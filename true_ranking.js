@@ -186,7 +186,7 @@ export class example extends plugin {
         const s = total / allScore.length
         const sf = s.toFixed(1)
         console.log('平均分:', sf)
-        this.reply(`番剧名：${offical_title}\n真实平均分：${sf}\n基于实际收集到的${allScore.length}个评价（官方标注含${totalCount.short}个短评与${totalCount.long}个长评，实际收集数据可能因风控等原因不与标称值相同）\n----------\n官方平均分：${offical_score}\n基于${offical_count}个评价（含长短评）`)
+        this.reply(`番剧名：${offical_title}\n真实平均分：${sf}\n基于实际收集到的${allScore.length}个评价（含${totalCount.short}个短评与${totalCount.long}个长评，实际收集数据可能因风控等原因不与标称值相同）\n----------\n官方平均分：${offical_score}\n基于${offical_count}个评价（含长短评）`)
     }
     async handlerList(list) {
         allScore.push(...list.map(item => item.score))
