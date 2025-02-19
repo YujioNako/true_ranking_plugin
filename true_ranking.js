@@ -16,8 +16,8 @@ let totalCount = {
 //let render = null
 
 var offical_title = "";
-var offical_score = 0;
-var offical_count = 0;
+var offical_score = "";
+var offical_count = "";
 
 export class example extends plugin {
     constructor() {
@@ -133,7 +133,7 @@ export class example extends plugin {
     }
     
     async getScore(next, type, e) {
-        await this.delay(200);
+        await this.delay(500);
     
         //var local_url = window.location.href;
         
@@ -173,6 +173,9 @@ export class example extends plugin {
             const data = await this.getScore(next, type, e, md_id)
             this.handlerList(data.list)
             //render(type)
+            if (next == data.next) {
+                return
+            }
             next = data.next
             if (next == 0) {
                 return
@@ -186,7 +189,7 @@ export class example extends plugin {
         const s = total / allScore.length
         const sf = s.toFixed(1)
         console.log('平均分:', sf)
-        this.reply(`番剧名：${offical_title}\n真实平均分：${sf}\n基于实际收集到的${allScore.length}个评价（含${totalCount.short}个短评与${totalCount.long}个长评，实际收集数据可能因风控等原因不与标称值相同）\n----------\n官方平均分：${offical_score}\n基于${offical_count}个评价（含长短评）`)
+        this.reply(`当前时间：${new Date().toLocaleString()}\n番剧名：${offical_title}\n真实平均分：${sf}\n基于实际收集到的${allScore.length}个评价（含${totalCount.short}个短评与${totalCount.long}个长评，实际收集数据可能因风控等原因不与标称值相同）\n----------\n官方平均分：${offical_score}\n基于${offical_count}个评价（含长短评）`)
     }
     async handlerList(list) {
         allScore.push(...list.map(item => item.score))
