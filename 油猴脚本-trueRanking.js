@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.2.1
+// @version      1.2.3
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -58,17 +58,17 @@
             this.toggleBtn.addEventListener('click', () => this.togglePanel());
             this.panel.querySelector('.close-btn').addEventListener('click', () => this.togglePanel());
             this.panel.querySelector('.start-btn').addEventListener('click', () => this.startAnalysis());
-        
-            // 新增自动填充逻辑
-            if (this.isOpen) {
-                this.autoFillInput();
-            }
         }
 
         togglePanel() {
             this.isOpen = !this.isOpen;
             this.panel.style.transform = `translateX(${this.isOpen ? '0' : '100%'})`;
             this.toggleBtn.style.opacity = this.isOpen ? '0' : '1';
+
+            // 新增自动填充逻辑
+            if (this.isOpen) {
+                this.autoFillInput();
+            }
         }
 
         autoFillInput() {
@@ -80,7 +80,7 @@
             const ssMatch = currentUrl.match(/(\/ss|ss)(\d+)/i);
         
             // 清空原有内容
-            input.value = '';
+            input.value = '正在获取md号...';
             
             if (mdMatch) {
                 input.value = `md${mdMatch[2]}`;
@@ -190,7 +190,7 @@
             this.longScores = [];
             this.totalCount = { short: 0, long: 0 };
             this.metadata = {};
-            this.retryLimit = 3;
+            this.retryLimit = 5;
             this.banWaitTime = 60000;
         }
 
