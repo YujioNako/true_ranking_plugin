@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.1
+// @version      1.2
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -22,7 +22,7 @@
             this.isOpen = false;
             this.createUI();
             this.bindEvents();
-            this.autoFillInput();
+            //this.autoFillInput();
         }
 
         createUI() {
@@ -30,6 +30,7 @@
             this.toggleBtn = document.createElement('div');
             this.toggleBtn.className = 'control-btn';
             this.toggleBtn.textContent = '评分统计';
+            this.toggleBtn.onclick = 'ControlPanelFunc.autoFillInput()';
 
             // 控制台主体
             this.panel = document.createElement('div');
@@ -428,5 +429,5 @@
     `);
 
     // 初始化控制台
-    new ControlPanel();
+    const ControlPanelFunc = new ControlPanel();
 })();
