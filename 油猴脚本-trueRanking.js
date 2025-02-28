@@ -9,6 +9,7 @@
 // @grant        GM_getValue
 // @grant        GM_setValue
 // @updateURL    https://back-proxy.pro-ivan.cn/proxy/https://raw.githubusercontent.com/YujioNako/true_ranking_plugin/refs/heads/main/油猴脚本-trueRanking.js
+// @downloadURL  https://back-proxy.pro-ivan.cn/proxy/https://raw.githubusercontent.com/YujioNako/true_ranking_plugin/refs/heads/main/油猴脚本-trueRanking.js
 // @homepage     https://github.com/YujioNako/true_ranking_plugin/
 // @icon         https://pro-ivan.com/favicon.ico
 // ==/UserScript==
