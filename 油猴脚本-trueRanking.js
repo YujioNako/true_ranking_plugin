@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.0
+// @version      1.1
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -72,11 +72,15 @@
             
             const mdMatch = currentUrl.match(/(\/md|md)(\d+)/i);
             const epMatch = currentUrl.match(/(\/ep|ep)(\d+)/i);
+            const ssMatch = currentUrl.match(/(\/ss|ss)(\d+)/i);
             
             if (mdMatch) {
                 input.value = `md${mdMatch[2]}`;
             } else if (epMatch) {
                 this.epToMd(`https://www.bilibili.com/bangumi/play/ep${epMatch[2]}`)
+                    .then(md => input.value = md);
+            } else if (ssMatch) {
+                this.epToMd(`https://www.bilibili.com/bangumi/play/ss${ssMatch[2]}`)
                     .then(md => input.value = md);
             }
         }
