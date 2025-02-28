@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         B站番剧评分统计
-// @namespace    http://tampermonkey.net/
+// @namespace    https://pro-ivan.com/
 // @version      0.0
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
