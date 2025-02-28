@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.2
+// @version      1.2.1
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -30,7 +30,6 @@
             this.toggleBtn = document.createElement('div');
             this.toggleBtn.className = 'control-btn';
             this.toggleBtn.textContent = '评分统计';
-            this.toggleBtn.onclick = 'ControlPanelFunc.autoFillInput()';
 
             // 控制台主体
             this.panel = document.createElement('div');
@@ -59,6 +58,11 @@
             this.toggleBtn.addEventListener('click', () => this.togglePanel());
             this.panel.querySelector('.close-btn').addEventListener('click', () => this.togglePanel());
             this.panel.querySelector('.start-btn').addEventListener('click', () => this.startAnalysis());
+        
+            // 新增自动填充逻辑
+            if (this.isOpen) {
+                this.autoFillInput();
+            }
         }
 
         togglePanel() {
@@ -74,6 +78,9 @@
             const mdMatch = currentUrl.match(/(\/md|md)(\d+)/i);
             const epMatch = currentUrl.match(/(\/ep|ep)(\d+)/i);
             const ssMatch = currentUrl.match(/(\/ss|ss)(\d+)/i);
+        
+            // 清空原有内容
+            input.value = '';
             
             if (mdMatch) {
                 input.value = `md${mdMatch[2]}`;
@@ -429,5 +436,5 @@
     `);
 
     // 初始化控制台
-    const ControlPanelFunc = new ControlPanel();
+    new ControlPanel();
 })();
