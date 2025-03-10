@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.0
+// @version      1.3.1
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -12,6 +12,7 @@
 // @downloadURL  https://back-proxy.pro-ivan.cn/proxy/https://raw.githubusercontent.com/YujioNako/true_ranking_plugin/refs/heads/main/油猴脚本-trueRanking.js
 // @homepage     https://github.com/YujioNako/true_ranking_plugin/
 // @icon         https://pro-ivan.com/favicon.ico
+// @license      MIT
 // ==/UserScript==
 
 (function() {
