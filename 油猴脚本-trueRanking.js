@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.2.3
+// @version      1.3.0
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -150,7 +150,7 @@
                         </div>
                         <div class="result-item">
                             <span class="label">统计评分：</span>
-                            <span class="value">${data.total_avg}</span>
+                            <span class="value">${data.total_avg}(${data.total_probability}%)</span>
                         </div>
                         <div class="result-item">
                             <span class="label">标称评论数：</span>
@@ -164,12 +164,12 @@
                     <div class="details">
                         <div class="detail-section short">
                             <h5>短评统计</h5>
-                            <p>平均分：${data.short_avg}</p>
+                            <p>平均分：${data.short_avg}(${data.short_probability}%)</p>
                             <p>样本数：${data.short_samples}</p>
                         </div>
                         <div class="detail-section long">
                             <h5>长评统计</h5>
-                            <p>平均分：${data.long_avg}</p>
+                            <p>平均分：${data.long_avg}(${data.long_probability}%)</p>
                             <p>样本数：${data.long_samples}</p>
                         </div>
                     </div>
@@ -297,16 +297,56 @@
                 ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)
                 : '暂无';
 
+            function calculateProbability(totalScores, officialCount) {
+                const n = totalScores.length;
+                if (n === 0 || officialCount === 0) return 0; // 处理无效输入
+
+                // 计算样本均值和样本标准差
+                const sum = totalScores.reduce((acc, score) => acc + score, 0);
+                const sampleMean = sum / n;
+                const sumSquaredDiffs = totalScores.reduce((acc, score) => acc + Math.pow(score - sampleMean, 2), 0);
+                const sampleVariance = sumSquaredDiffs / (n - 1);
+                const s = Math.sqrt(sampleVariance);
+
+                // 计算标准误，考虑有限总体校正
+                let standardError;
+                const populationSize = officialCount;
+                if (populationSize <= 1) {
+                    standardError = 0;
+                } else {
+                    const finitePopulationCorrection = Math.sqrt((populationSize - n) / (populationSize - 1));
+                    standardError = (s / Math.sqrt(n)) * finitePopulationCorrection;
+                }
+
+                if (standardError === 0) return 1; // 无误差，概率为1
+
+                const Z = 0.1 / standardError;
+                return 2 * standardNormalCDF(Z) - 1;
+            }
+
+            // 标准正态分布CDF近似计算
+            function standardNormalCDF(x) {
+                const sign = x < 0 ? -1 : 1;
+                x = Math.abs(x) / Math.sqrt(2);
+                const t = 1.0 / (1.0 + 0.3275911 * x);
+                const y = t * (0.254829592 + t*(-0.284496736 + t*(1.421413741 + t*(-1.453152027 + t*1.061405429))));
+                const erf = 1 - y * Math.exp(-x * x);
+                return 0.5 * (1 + sign * erf);
+            }
+
             this.ui.showResults({
                 title: this.metadata.title,
                 offical_score: this.metadata.official_score,
                 total_avg: calcAvg(totalScores),
                 offical_count: this.metadata.official_count,
                 total_samples: totalScores.length,
+                total_probability: (100*calculateProbability(totalScores, this.metadata.official_count)).toFixed(2),
                 short_avg: calcAvg(this.shortScores),
                 short_samples: this.shortScores.length,
+                short_probability: (100*calculateProbability(this.shortScores, this.shortScores.length)).toFixed(2),
                 long_avg: calcAvg(this.longScores),
-                long_samples: this.longScores.length
+                long_samples: this.longScores.length,
+                long_probability: (100*calculateProbability(this.shortScores, this.shortScores.length)).toFixed(2)
             });
         }
 
