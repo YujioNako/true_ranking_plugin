@@ -344,10 +344,10 @@
                 total_probability: (100*calculateProbability(totalScores, this.metadata.official_count)).toFixed(2),
                 short_avg: calcAvg(this.shortScores),
                 short_samples: this.shortScores.length,
-                short_probability: (100*calculateProbability(this.shortScores, this.shortScores.length)).toFixed(2),
+                short_probability: (100*calculateProbability(this.shortScores, this.totalCount['short'])).toFixed(2),
                 long_avg: calcAvg(this.longScores),
                 long_samples: this.longScores.length,
-                long_probability: (100*calculateProbability(this.shortScores, this.shortScores.length)).toFixed(2)
+                long_probability: (100*calculateProbability(this.shortScores, this.totalCount['long'])).toFixed(2)
             });
         }
 
