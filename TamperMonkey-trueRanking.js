@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.1
+// @version      1.3.2
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
