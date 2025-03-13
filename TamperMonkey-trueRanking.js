@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.5
+// @version      1.3.6
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -300,7 +300,9 @@
 
             function calculateProbability(totalScores, officialCount) {
                 const n = totalScores.length;
+                console.log(n,officialCount,totalScores);
                 if (n === 0 || officialCount === 0) return 0; // 处理无效输入
+                if (n >= officialCount) return 1; // 记录数等于甚至大于标称，无误差，概率为1
 
                 // 计算样本均值和样本标准差
                 const sum = totalScores.reduce((acc, score) => acc + score, 0);
@@ -322,6 +324,7 @@
                 if (standardError === 0) return 1; // 无误差，概率为1
 
                 const Z = 0.1 / standardError;
+                console.log(2 * standardNormalCDF(Z) - 1);
                 return 2 * standardNormalCDF(Z) - 1;
             }
 
@@ -344,10 +347,10 @@
                 total_probability: (100*calculateProbability(totalScores, this.metadata.official_count)).toFixed(2),
                 short_avg: calcAvg(this.shortScores),
                 short_samples: this.shortScores.length,
-                short_probability: (100*calculateProbability(this.shortScores, this.totalCount['short'])).toFixed(2),
+                short_probability: (100*calculateProbability(this.shortScores, this.totalCount.short)).toFixed(2),
                 long_avg: calcAvg(this.longScores),
                 long_samples: this.longScores.length,
-                long_probability: (100*calculateProbability(this.longScores, this.totalCount['long'])).toFixed(2)
+                long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2)
             });
         }
 
