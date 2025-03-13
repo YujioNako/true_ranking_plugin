@@ -9,10 +9,10 @@
 
 使用方法参考 #番剧评分帮助
 ### 油猴脚本
-将`油猴脚本_trueRanking.js`导入油猴后，在任意番剧页面通过右侧按钮打开面板使用
+将`TamperMonkey-trueRanking.js`导入油猴后，在任意番剧页面通过右侧按钮打开面板使用
 
 ### 浏览器脚本
-复制`浏览器脚本_trueRanking.js`到浏览器开发者工具的控制台，然后按脚本内说明使用
+复制`console-trueRanking.js`到浏览器开发者工具的控制台，然后按脚本内说明使用
 
 ## 注意
 输入的番剧号（md号）指的是番剧详情页面的网址中，“https://www.bilibili.com/bangumi/media/md” 后面跟着的那一串数字；
