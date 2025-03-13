@@ -301,6 +301,7 @@
             function calculateProbability(totalScores, officialCount) {
                 const n = totalScores.length;
                 if (n === 0 || officialCount === 0) return 0; // 处理无效输入
+                if (n >= officialCount) return 1; // 记录数等于甚至大于标称，无误差，概率为1
 
                 // 计算样本均值和样本标准差
                 const sum = totalScores.reduce((acc, score) => acc + score, 0);
