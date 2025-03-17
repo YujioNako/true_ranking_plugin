@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.6
+// @version      1.3.7
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -45,7 +45,7 @@
                         <label>输入MD/EP ID或链接：</label>
                         <input type="text" id="bInput" class="b-input" placeholder="md123456 或 B站链接">
                     </div>
-                    <button class="start-btn">开始统计</button>
+                    <button class="start-btn" id="start-btn">开始统计</button>
                     <div class="progress-area"></div>
                     <div class="result-area"></div>
                 </div>
@@ -107,6 +107,8 @@
         }
 
         startAnalysis() {
+            this.panel.querySelector('#start-btn').innerHTML = '正在统计';
+            this.panel.querySelector('#start-btn').style = 'pointer-events: none; background: gray;';
             const input = this.panel.querySelector('#bInput').value.trim();
             if (!input) {
                 this.showMessage('输入不能为空！', 'error');
@@ -143,7 +145,7 @@
             const resultArea = this.panel.querySelector('.result-area');
             resultArea.innerHTML = `
                 <div class="result-section">
-                    <h4>${data.title}</h4>
+                    <h4>${data.title} <small>${new Date().toLocaleString('sv-SE')}</small></h4>
                     <div class="result-grid">
                         <div class="result-item">
                             <span class="label">官方评分：</span>
@@ -255,6 +257,8 @@
                 
                 const progress = ((collected / this.totalCount[type]) * 100).toFixed(1);
                 this.ui.updateProgress(type, progress, collected, this.totalCount[type]);
+
+                if (cursor && cursor == result.data.next) break;
                 
                 cursor = result.data.next;
                 await this.delay(200);
@@ -273,19 +277,26 @@
                         headers: {
                             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36",
                             "Referer": "https://www.bilibili.com"
-                        }
+                        },
+                        credentials: 'include'
                     });
 
                     const data = await res.json();
-                    if (data.code === -412) {
+                    if (data.code !== 0) {
+                        document.querySelector('#start-btn').innerHTML = `等待第${retry + 1}次重试`;
+                        console.log(`等待第${retry + 1}次重试`);
                         await this.delay(this.banWaitTime);
                         retry++;
+                        document.querySelector('#start-btn').innerHTML = `正在统计`;
                         continue;
                     }
                     return data;
                 } catch (e) {
-                    retry++;
+                    document.querySelector('#start-btn').innerHTML = `等待第${retry + 1}次重试`;
+                    console.log(`等待第${retry + 1}次重试`);
                     await this.delay(1000);
+                    retry++;
+                    document.querySelector('#start-btn').innerHTML = `正在统计`;
                 }
             }
             throw new Error('请求失败，请稍后重试');
@@ -352,6 +363,9 @@
                 long_samples: this.longScores.length,
                 long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2)
             });
+
+            document.querySelector('#start-btn').innerHTML = '开始统计';
+            document.querySelector('#start-btn').style = '';
         }
 
         delay(ms) {
@@ -481,4 +495,6 @@
 
     // 初始化控制台
     new ControlPanel();
+})();
+
 })();
