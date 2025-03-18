@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.7
+// @version      1.3.8
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -261,7 +261,7 @@
                 if (cursor && cursor == result.data.next) break;
                 
                 cursor = result.data.next;
-                await this.delay(200);
+                await this.delay(Math.floor(Math.random() * 100) + 100);
             } while (cursor && cursor !== "0");
         }
 
