@@ -1,13 +1,14 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.8
+// @version      1.3.9
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
 // @grant        GM_addStyle
 // @grant        GM_getValue
 // @grant        GM_setValue
+// @grant        GM_deleteValue
 // @updateURL    https://back-proxy.pro-ivan.cn/proxy/https://raw.githubusercontent.com/YujioNako/true_ranking_plugin/refs/heads/main/TamperMonkey-trueRanking.js
 // @downloadURL  https://back-proxy.pro-ivan.cn/proxy/https://raw.githubusercontent.com/YujioNako/true_ranking_plugin/refs/heads/main/TamperMonkey-trueRanking.js
 // @homepage     https://github.com/YujioNako/true_ranking_plugin/
@@ -21,6 +22,7 @@
     class ControlPanel {
         constructor() {
             this.isOpen = false;
+            this.currentMd = null;
             this.createUI();
             this.bindEvents();
             //this.autoFillInput();
@@ -84,15 +86,35 @@
             input.value = '正在获取md号...';
             
             if (mdMatch) {
-                input.value = `md${mdMatch[2]}`;
+                this.currentMd = mdMatch[2];
+                input.value = `md${this.currentMd}`;
+                this.loadSavedData();
             } else if (epMatch) {
                 this.epToMd(`https://www.bilibili.com/bangumi/play/ep${epMatch[2]}`)
-                    .then(md => input.value = md);
+                    .then(md => {
+                        this.currentMd = md.replace('md', '');
+                        input.value = md;
+                        this.loadSavedData();
+                    });
             } else if (ssMatch) {
                 this.epToMd(`https://www.bilibili.com/bangumi/play/ss${ssMatch[2]}`)
-                    .then(md => input.value = md);
+                    .then(md => {
+                        this.currentMd = md.replace('md', '');
+                        input.value = md;
+                        this.loadSavedData();
+                    });
             }
         }
+
+         async loadSavedData() {
+             if (!this.currentMd) return;
+             const saved = GM_getValue(`md${this.currentMd}`);
+             if (saved) {
+                 saved.isCached = true;
+                 this.showResults(saved);
+                 console.log('找到cache');
+             }
+         }
 
         async epToMd(url) {
             try {
@@ -107,6 +129,10 @@
         }
 
         startAnalysis() {
+             if (this.currentMd) {
+                 GM_deleteValue(`md${this.currentMd}`);
+             }
+
             this.panel.querySelector('#start-btn').innerHTML = '正在统计';
             this.panel.querySelector('#start-btn').style = 'pointer-events: none; background: gray;';
             const input = this.panel.querySelector('#bInput').value.trim();
@@ -145,7 +171,7 @@
             const resultArea = this.panel.querySelector('.result-area');
             resultArea.innerHTML = `
                 <div class="result-section">
-                    <h4>${data.title} <small>${new Date().toLocaleString('sv-SE')}</small></h4>
+                    <h4>${data.title} <small>${new Date().toLocaleString('sv-SE')}${data.isCached ? '<span style="color:#00a1d6">(缓存数据)</span>' : ''}</small></h4>
                     <div class="result-grid">
                         <div class="result-item">
                             <span class="label">官方评分：</span>
@@ -195,11 +221,13 @@
             this.metadata = {};
             this.retryLimit = 5;
             this.banWaitTime = 60000;
+            this.mdId = null;
         }
 
         async analyze(input) {
             try {
                 const mdId = await this.processInput(input);
+                this.mdId = mdId;
                 if (!mdId) return;
 
                 await this.fetchBaseInfo(mdId);
@@ -261,7 +289,7 @@
                 if (cursor && cursor == result.data.next) break;
                 
                 cursor = result.data.next;
-                await this.delay(Math.floor(Math.random() * 100) + 100);
+                await this.delay(200);
             } while (cursor && cursor !== "0");
         }
 
@@ -349,7 +377,7 @@
                 return 0.5 * (1 + sign * erf);
             }
 
-            this.ui.showResults({
+            const resultData = {
                 title: this.metadata.title,
                 offical_score: this.metadata.official_score,
                 total_avg: calcAvg(totalScores),
@@ -361,8 +389,12 @@
                 short_probability: (100*calculateProbability(this.shortScores, this.totalCount.short)).toFixed(2),
                 long_avg: calcAvg(this.longScores),
                 long_samples: this.longScores.length,
-                long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2)
-            });
+                long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2),
+                timestamp: new Date().toISOString()
+            };
+            GM_setValue(`md${this.mdId}`, resultData);
+            console.log('cache已保存');
+            this.ui.showResults(resultData);
 
             document.querySelector('#start-btn').innerHTML = '开始统计';
             document.querySelector('#start-btn').style = '';
@@ -496,3 +528,4 @@
     // 初始化控制台
     new ControlPanel();
 })();
+
