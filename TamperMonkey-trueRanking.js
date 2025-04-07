@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.3.9
+// @version      1.4.0
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -65,8 +65,9 @@
 
         togglePanel() {
             this.isOpen = !this.isOpen;
-            this.panel.style.transform = `translateX(${this.isOpen ? '0' : '100%'})`;
+            this.panel.style.transform = `translateY(-50%) translateX(${this.isOpen ? '0' : '100%'})`;
             this.toggleBtn.style.opacity = this.isOpen ? '0' : '1';
+            this.toggleBtn.style.pointerEvents = this.isOpen ? 'none' : '';
 
             // 新增自动填充逻辑
             if (this.isOpen) {
@@ -200,6 +201,17 @@
                             <h5>长评统计</h5>
                             <p>平均分：${data.long_avg}(${data.long_probability}%)</p>
                             <p>样本数：${data.long_samples}</p>
+                        </div>
+                    </div>
+                    <div class="score-distribution">
+                        <h5>分数分布统计</h5>
+                        <div class="chart-container">
+                            ${[2,4,6,8,10].map(score => `
+                                <div class="bar-item">
+                                    <div class="bar" style="height: ${data.scoreDistribution[score] || 0}px"></div>
+                                    <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistribution[score] || 0}%)</span>
+                                </div>
+                            `).join('')}
                         </div>
                     </div>
                 </div>
@@ -377,6 +389,18 @@
                 return 0.5 * (1 + sign * erf);
             }
 
+            // 统计分数分布
+            const scoreDistribution = {};
+            [2,4,6,8,10].forEach(score => {
+                scoreDistribution[score] = (totalScores.filter(s => s === score).length / totalScores.length * 100 || 0).toFixed(1);
+            });
+
+            // 统计分数分布
+            const scoreDistributionNum = {};
+            [2,4,6,8,10].forEach(score => {
+                scoreDistributionNum[score] = (totalScores.filter(s => s === score).length || 0);
+            });
+
             const resultData = {
                 title: this.metadata.title,
                 offical_score: this.metadata.official_score,
@@ -390,6 +414,8 @@
                 long_avg: calcAvg(this.longScores),
                 long_samples: this.longScores.length,
                 long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2),
+                scoreDistribution: scoreDistribution,
+                scoreDistributionNum: scoreDistributionNum,
                 timestamp: new Date().toISOString()
             };
             GM_setValue(`md${this.mdId}`, resultData);
@@ -425,7 +451,7 @@
         .control-panel {
             position: fixed;
             right: 0;
-            top: 15%;
+            top: 50%;
             transform: translateY(-50%) translateX(100%);
             width: 350px;
             background: white;
@@ -522,6 +548,49 @@
             background: white;
             border-radius: 4px;
             box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+
+        span,p {
+            font-size: smaller;
+        }
+
+        .score-distribution {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f9f9f9;
+            border-radius: 4px;
+        }
+
+        .chart-container {
+            display: flex;
+            justify-content: space-around;
+            align-items: flex-end;
+            height: 100px;
+            margin-top: 10px;
+        }
+
+        .bar-item {
+            width: 18%;
+            text-align: center;
+        }
+
+        .bar {
+            background: #00a1d6;
+            transition: height 0.5s;
+            border-radius: 3px 3px 0 0;
+            position: relative;
+        }
+
+        .bar:hover {
+            background: #0087b3;
+            cursor: pointer;
+        }
+
+        .bar-item span {
+            display: block;
+            margin-top: 5px;
+            font-size: 12px;
+            color: #666;
         }
     `);
 
