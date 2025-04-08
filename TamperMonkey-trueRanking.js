@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.4.0
+// @version      1.4.1
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -172,7 +172,7 @@
             const resultArea = this.panel.querySelector('.result-area');
             resultArea.innerHTML = `
                 <div class="result-section">
-                    <h4>${data.title} <small>${new Date().toLocaleString('sv-SE')}${data.isCached ? '<span style="color:#00a1d6">(缓存数据)</span>' : ''}</small></h4>
+                    <h4>${data.title}<br><small>${data.isCached ? `${new Date(data.timestamp).toLocaleString('sv-SE')}<span style="color:#00a1d6">(缓存数据)</span>` : new Date().toLocaleString('sv-SE')}</small></h4>
                     <div class="result-grid">
                         <div class="result-item">
                             <span class="label">官方评分：</span>
@@ -208,7 +208,7 @@
                         <div class="chart-container">
                             ${[2,4,6,8,10].map(score => `
                                 <div class="bar-item">
-                                    <div class="bar" style="height: ${data.scoreDistribution[score] || 0}px"></div>
+                                    <div class="bar" style="height: ${50 * data.scoreDistribution[score] / Math.max(...Object.values(data.scoreDistribution)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistribution[score] || 0}%)</span>
                                 </div>
                             `).join('')}
