@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.4.1
+// @version      1.4.2
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -172,7 +172,7 @@
             const resultArea = this.panel.querySelector('.result-area');
             resultArea.innerHTML = `
                 <div class="result-section">
-                    <h4>${data.title}<br><small>${data.isCached ? `${new Date(data.timestamp).toLocaleString('sv-SE')}<span style="color:#00a1d6">(缓存数据)</span>` : new Date().toLocaleString('sv-SE')}</small></h4>
+                    <h4>${data.title}<br><small>${data.isCached ? `${new Date(data.timestamp).toLocaleString('sv-SE')}<span style="color:#00a1d6">(缓存数据)</span>` : new Date().toLocaleString('sv-SE')}</small><br><small style="color: gray;">过滤等级：${data.filterLevel}</small></h4>
                     <div class="result-grid">
                         <div class="result-item">
                             <span class="label">官方评分：</span>
@@ -180,7 +180,7 @@
                         </div>
                         <div class="result-item">
                             <span class="label">统计评分：</span>
-                            <span class="value">${data.total_avg}(${data.total_probability}%)</span>
+                            <span class="value">${data.total_avg_filtered}(${data.total_probability_filtered}%)/${data.total_avg}</span>
                         </div>
                         <div class="result-item">
                             <span class="label">标称评论数：</span>
@@ -188,19 +188,19 @@
                         </div>
                         <div class="result-item">
                             <span class="label">总样本数：</span>
-                            <span class="value">${data.total_samples}</span>
+                            <span class="value">${data.total_samples_filtered}/${data.total_samples}</span>
                         </div>
                     </div>
                     <div class="details">
                         <div class="detail-section short">
                             <h5>短评统计</h5>
-                            <p>平均分：${data.short_avg}(${data.short_probability}%)</p>
-                            <p>样本数：${data.short_samples}</p>
+                            <p>平均分：${data.short_avg_filtered}(${data.short_probability_filtered}%)/${data.short_avg}</p>
+                            <p>样本数：${data.short_samples_filtered}/${data.short_samples}</p>
                         </div>
                         <div class="detail-section long">
                             <h5>长评统计</h5>
-                            <p>平均分：${data.long_avg}(${data.long_probability}%)</p>
-                            <p>样本数：${data.long_samples}</p>
+                            <p>平均分：${data.long_avg_filtered}(${data.long_probability_filtered}%)/${data.long_avg}</p>
+                            <p>样本数：${data.long_samples_filtered}/${data.long_samples}</p>
                         </div>
                     </div>
                     <div class="score-distribution">
@@ -208,8 +208,37 @@
                         <div class="chart-container">
                             ${[2,4,6,8,10].map(score => `
                                 <div class="bar-item">
+                                    <div class="bar" style="height: ${50 * data.scoreDistributionFiltered[score] / Math.max(...Object.values(data.scoreDistributionFiltered)) || 0}px"></div>
+                                    <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistributionFiltered[score] || 0}%)</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <h5>分数分布统计（未过滤）</h5>
+                        <div class="chart-container">
+                            ${[2,4,6,8,10].map(score => `
+                                <div class="bar-item">
                                     <div class="bar" style="height: ${50 * data.scoreDistribution[score] / Math.max(...Object.values(data.scoreDistribution)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistribution[score] || 0}%)</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                    <div class="score-distribution">
+                        <h5>平均分变化统计</h5>
+                        <div class="chart-container">
+                            ${[0,1,2,3,4,5,6,7].map(score => `
+                                <div class="bar-item">
+                                    <div class="bar" style="height: ${50 * (data.scoreTrendFiltered[score] - Math.min(...Object.values(data.scoreTrendFiltered))) / (Math.max(...Object.values(data.scoreTrendFiltered)) - Math.min(...Object.values(data.scoreTrendFiltered))) || 0}px"></div>
+                                    <span>${new Date(data.scoreTrendTimeFiltered[score] * 1000).toISOString().slice(5, 10)}<br>${data.scoreTrendFiltered[score] || 0}</span>
+                                </div>
+                            `).join('')}
+                        </div>
+                        <h5>平均分变化统计（未过滤）</h5>
+                        <div class="chart-container">
+                            ${[0,1,2,3,4,5,6,7].map(score => `
+                                <div class="bar-item">
+                                    <div class="bar" style="height: ${50 * (data.scoreTrend[score] - Math.min(...Object.values(data.scoreTrend))) / (Math.max(...Object.values(data.scoreTrend)) - Math.min(...Object.values(data.scoreTrend))) || 0}px"></div>
+                                    <span>${new Date(data.scoreTrendTime[score] * 1000).toISOString().slice(5, 10)}<br>${data.scoreTrend[score] || 0}</span>
                                 </div>
                             `).join('')}
                         </div>
@@ -229,11 +258,14 @@
             this.ui = ui;
             this.shortScores = [];
             this.longScores = [];
+            this.shortScoresFiltered = [];
+            this.longScoresFiltered = [];
             this.totalCount = { short: 0, long: 0 };
             this.metadata = {};
             this.retryLimit = 5;
             this.banWaitTime = 60000;
             this.mdId = null;
+            this.filterLevel = 5;
         }
 
         async analyze(input) {
@@ -289,7 +321,7 @@
                 const result = await this.getReviewPage(type, mdId, cursor);
                 if (!result?.data?.list) break;
 
-                const scores = result.data.list.map(item => item.score);
+                const scores = result.data.list.map(item => [item.score, item.author.level, item.ctime]);
                 type === 'short' ? this.shortScores.push(...scores) : this.longScores.push(...scores);
                 
                 collected += result.data.list.length;
@@ -343,13 +375,23 @@
         }
 
         showFinalResults() {
+            function filterData(data, filterLevel) {
+                return data.filter(item => item[1] >= filterLevel);
+            }
+
+            this.shortScoresFiltered = filterData(this.shortScores, this.filterLevel);
+            this.longScoresFiltered = filterData(this.longScores, this.filterLevel);
+
             const totalScores = [...this.shortScores, ...this.longScores];
-            
-            const calcAvg = scores => scores.length 
-                ? (scores.reduce((a, b) => a + b, 0) / scores.length).toFixed(1)
+            const totalScoresFiltered = [...this.shortScoresFiltered, ...this.longScoresFiltered];
+
+            const calcAvg = scores => scores.length
+                ? (scores.reduce((sum, item) => sum + item[0], 0) / scores.length).toFixed(1)
                 : '暂无';
 
             function calculateProbability(totalScores, officialCount) {
+                totalScores = totalScores.map(item => item[0]); // 提取原数据的分数项目方便计算
+
                 const n = totalScores.length;
                 console.log(n,officialCount,totalScores);
                 if (n === 0 || officialCount === 0) return 0; // 处理无效输入
@@ -389,35 +431,129 @@
                 return 0.5 * (1 + sign * erf);
             }
 
-            // 统计分数分布
-            const scoreDistribution = {};
-            [2,4,6,8,10].forEach(score => {
-                scoreDistribution[score] = (totalScores.filter(s => s === score).length / totalScores.length * 100 || 0).toFixed(1);
-            });
+            // 统计分数分布（基于每个子数组的第一个元素）
+            const scoreDistribution = (totalScores) =>
+            [2,4,6,8,10].reduce((acc, score) => {
+                const count = totalScores.filter(s => s[0] === score).length;
+                acc[score] = totalScores.length === 0
+                    ? "0.0"
+                : (count / totalScores.length * 100).toFixed(1);
+                return acc;
+            }, {});
 
-            // 统计分数分布
-            const scoreDistributionNum = {};
-            [2,4,6,8,10].forEach(score => {
-                scoreDistributionNum[score] = (totalScores.filter(s => s === score).length || 0);
-            });
+            // 统计分数分布数量（基于每个子数组的第一个元素）
+            const scoreDistributionNum = (totalScores) =>
+            [2,4,6,8,10].reduce((acc, score) => {
+                acc[score] = totalScores.filter(s => s[0] === score).length;
+                return acc;
+            }, {});
+
+            // 计算随时间变化的平均分变化情况
+            function computeAverageScores(data) {
+                if (data.length === 0) return [];
+
+                // 提取时间戳
+                const times = data.map(item => item[2]);
+                const minTime = Math.min(...times);
+                const maxTime = Math.max(...times);
+                const totalSpan = maxTime - minTime;
+
+                if (totalSpan === 0) {
+                    // 所有时戳相同，返回所有评分的平均值
+                    const avg = data.reduce((sum, item) => sum + item[0], 0) / data.length;
+                    return Array(8).fill(avg);
+                }
+
+                // 初始化8个时间段的统计
+                const intervals = Array(8).fill(0).map(() => ({ sum: 0, count: 0 }));
+                const intervalLength = totalSpan / 8;
+
+                for (const item of data) {
+                    const timestamp = item[2];
+                    const score = item[0];
+
+                    // 计算属于哪个时间段
+                    let intervalIndex = Math.floor((timestamp - minTime) / intervalLength);
+                    if (intervalIndex >= 8) intervalIndex = 7;
+
+                    intervals[intervalIndex].sum += score;
+                    intervals[intervalIndex].count += 1;
+                }
+
+                // 修改后的累积平均分计算
+                return intervals.reduce((acc, interval, index) => {
+                    // 累加当前段的sum和count
+                    const prev = acc[index - 1] || { cumulativeSum: 0, cumulativeCount: 0 };
+                    const cumulativeSum = prev.cumulativeSum + interval.sum;
+                    const cumulativeCount = prev.cumulativeCount + interval.count;
+
+                    // 计算并保存当前累积平均值
+                    const avg = cumulativeCount > 0
+                    ? (cumulativeSum / cumulativeCount).toFixed(2)
+                    : '0.0';
+
+                    return [...acc, {
+                        cumulativeSum,
+                        cumulativeCount,
+                        avg
+                    }];
+                }, []).map(item => item.avg);
+            }
+
+            function computeAverageScoresTime(data) {
+                if (data.length === 0) return [];
+
+                // 提取时间戳
+                const times = data.map(item => item[2]);
+                const minTime = Math.min(...times);
+                const maxTime = Math.max(...times);
+                const totalSpan = maxTime - minTime;
+
+                if (totalSpan === 0) {
+                    // 所有时戳相同，返回minTime
+                    return Array(8).fill(minTime);
+                }
+
+                // 初始化8个时间段的统计
+                const intervals = Array(8).fill(0).map(() => ({ sum: 0, count: 0 }));
+                const intervalLength = totalSpan / 8;
+                return Array.from({length: 8}, (_, i) => (minTime + (i+1)*intervalLength).toFixed(0));
+            }
 
             const resultData = {
                 title: this.metadata.title,
                 offical_score: this.metadata.official_score,
                 total_avg: calcAvg(totalScores),
+                total_avg_filtered: calcAvg(totalScoresFiltered),
                 offical_count: this.metadata.official_count,
                 total_samples: totalScores.length,
+                total_samples_filtered: totalScoresFiltered.length,
                 total_probability: (100*calculateProbability(totalScores, this.metadata.official_count)).toFixed(2),
+                total_probability_filtered: (100*calculateProbability(totalScoresFiltered, this.metadata.official_count)).toFixed(2),
                 short_avg: calcAvg(this.shortScores),
+                short_avg_filtered: calcAvg(this.shortScoresFiltered),
                 short_samples: this.shortScores.length,
+                short_samples_filtered: this.shortScoresFiltered.length,
                 short_probability: (100*calculateProbability(this.shortScores, this.totalCount.short)).toFixed(2),
+                short_probability_filtered: (100*calculateProbability(this.shortScoresFiltered, this.totalCount.short)).toFixed(2),
                 long_avg: calcAvg(this.longScores),
+                long_avg_filtered: calcAvg(this.longScoresFiltered),
                 long_samples: this.longScores.length,
+                long_samples_filtered: this.longScoresFiltered.length,
                 long_probability: (100*calculateProbability(this.longScores, this.totalCount.long)).toFixed(2),
-                scoreDistribution: scoreDistribution,
-                scoreDistributionNum: scoreDistributionNum,
+                long_probability_filtered: (100*calculateProbability(this.longScoresFiltered, this.totalCount.long)).toFixed(2),
+                scoreDistribution: scoreDistribution(totalScores),
+                scoreDistributionFiltered: scoreDistribution(totalScoresFiltered),
+                scoreDistributionNum: scoreDistributionNum(totalScores),
+                scoreDistributionNumFiltered: scoreDistributionNum(totalScoresFiltered),
+                scoreTrend: computeAverageScores(totalScores),
+                scoreTrendFiltered: computeAverageScores(totalScoresFiltered),
+                scoreTrendTime: computeAverageScoresTime(totalScores),
+                scoreTrendTimeFiltered: computeAverageScoresTime(totalScoresFiltered),
+                filterLevel: this.filterLevel,
                 timestamp: new Date().toISOString()
             };
+            console.log(computeAverageScores(totalScores));
             GM_setValue(`md${this.mdId}`, resultData);
             console.log('cache已保存');
             this.ui.showResults(resultData);
