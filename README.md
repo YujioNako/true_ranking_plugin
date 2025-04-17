@@ -29,7 +29,7 @@
 <img src="https://i0.hdslb.com/bfs/new_dyn/ca832d860bc9bdc7431fb641864b713711022578.jpg@1554w.webp" width=50%>
 
 ### 油猴脚本
-![image](https://github.com/user-attachments/assets/fd179846-511b-420e-a6a0-431b44943218)
+<img width=80% alt="1744849868124" src="https://github.com/user-attachments/assets/108a91aa-3e41-4c4e-8346-c598fd74e6ad" />
 
 ## 其他
 感谢：
