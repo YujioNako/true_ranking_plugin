@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.4.2
+// @version      1.5.0
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -172,41 +172,55 @@
             const resultArea = this.panel.querySelector('.result-area');
             resultArea.innerHTML = `
                 <div class="result-section">
-                    <h4>${data.title}<br><small>${data.isCached ? `${new Date(data.timestamp).toLocaleString('sv-SE')}<span style="color:#00a1d6">(缓存数据)</span>` : new Date().toLocaleString('sv-SE')}</small><br><small style="color: gray;">过滤等级：${data.filterLevel}</small></h4>
+                    <h3>${data.title}</h3><h4><small>过滤等级：${data.filterLevel}</small><br><small style="color:gray">${data.isCached ? `${new Date(data.timestamp).toLocaleString('sv-SE')}<span style="color:#00a1d6">(缓存数据)</span>` : new Date().toLocaleString('sv-SE')}</small></h4>
                     <div class="result-grid">
                         <div class="result-item">
-                            <span class="label">官方评分：</span>
-                            <span class="value">${data.offical_score}</span>
+                            <p class="label">官方评分</p>
+                            <p class="value">${data.offical_score}</p>
                         </div>
                         <div class="result-item">
-                            <span class="label">统计评分：</span>
-                            <span class="value">${data.total_avg_filtered}(${data.total_probability_filtered}%)/${data.total_avg}</span>
+                            <p class="label">计算评分</p>
+                            <p class="value">${data.total_avg_filtered}(${data.total_probability_filtered}%)</p>
+                            <p class="value unfiltered">${data.total_avg}(${data.total_probability}%)</p>
                         </div>
                         <div class="result-item">
-                            <span class="label">标称评论数：</span>
-                            <span class="value">${data.offical_count}</span>
+                            <p class="label">标称数</p>
+                            <p class="value">${data.offical_count}</p>
                         </div>
                         <div class="result-item">
-                            <span class="label">总样本数：</span>
-                            <span class="value">${data.total_samples_filtered}/${data.total_samples}</span>
+                            <p class="label">样本数</p>
+                            <p class="value">${data.total_samples_filtered}</p>
+                            <p class="value unfiltered">${data.total_samples}</p>
                         </div>
                     </div>
                     <div class="details">
                         <div class="detail-section short">
-                            <h5>短评统计</h5>
-                            <p>平均分：${data.short_avg_filtered}(${data.short_probability_filtered}%)/${data.short_avg}</p>
-                            <p>样本数：${data.short_samples_filtered}/${data.short_samples}</p>
+                            <h5 style="margin-bottom: 8px;">短评统计</h5>
+                            <p class="label">平均分</p>
+                            <p class="value">${data.short_avg_filtered}(${data.short_probability_filtered}%)</p>
+                            <p class="value unfiltered">${data.short_avg}(${data.short_probability}%)</p>
+                            <p class="label">标称数</p>
+                            <p class="value">${data.short_official_count}</p>
+                            <p class="label">样本数</p>
+                            <p class="value">${data.short_samples_filtered}</p>
+                            <p class="value unfiltered">${data.short_samples}</p>
                         </div>
                         <div class="detail-section long">
-                            <h5>长评统计</h5>
-                            <p>平均分：${data.long_avg_filtered}(${data.long_probability_filtered}%)/${data.long_avg}</p>
-                            <p>样本数：${data.long_samples_filtered}/${data.long_samples}</p>
+                            <h5 style="margin-bottom: 8px;">长评统计</h5>
+                            <p class="label">平均分</p>
+                            <p class="value">${data.long_avg_filtered}(${data.long_probability_filtered}%)</p>
+                            <p class="value unfiltered">${data.long_avg}(${data.long_probability}%)</p>
+                            <p class="label">标称数</p>
+                            <p class="value">${data.long_official_count}</p>
+                            <p class="label">样本数</p>
+                            <p class="value">${data.long_samples_filtered}</p>
+                            <p class="value unfiltered">${data.long_samples}</p>
                         </div>
                     </div>
                     <div class="score-distribution">
                         <h5>分数分布统计</h5>
                         <div class="chart-container">
-                            ${[2,4,6,8,10].map(score => `
+                            ${Object.keys(data.scoreDistributionFiltered).map(score => `
                                 <div class="bar-item">
                                     <div class="bar" style="height: ${50 * data.scoreDistributionFiltered[score] / Math.max(...Object.values(data.scoreDistributionFiltered)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistributionFiltered[score] || 0}%)</span>
@@ -215,7 +229,7 @@
                         </div>
                         <h5>分数分布统计（未过滤）</h5>
                         <div class="chart-container">
-                            ${[2,4,6,8,10].map(score => `
+                            ${Object.keys(data.scoreDistribution).map(score => `
                                 <div class="bar-item">
                                     <div class="bar" style="height: ${50 * data.scoreDistribution[score] / Math.max(...Object.values(data.scoreDistribution)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistribution[score] || 0}%)</span>
@@ -225,23 +239,63 @@
                     </div>
                     <div class="score-distribution">
                         <h5>平均分变化统计</h5>
-                        <div class="chart-container">
-                            ${[0,1,2,3,4,5,6,7].map(score => `
-                                <div class="bar-item">
-                                    <div class="bar" style="height: ${50 * (data.scoreTrendFiltered[score] - Math.min(...Object.values(data.scoreTrendFiltered))) / (Math.max(...Object.values(data.scoreTrendFiltered)) - Math.min(...Object.values(data.scoreTrendFiltered))) || 0}px"></div>
-                                    <span>${new Date(data.scoreTrendTimeFiltered[score] * 1000).toISOString().slice(5, 10)}<br>${data.scoreTrendFiltered[score] || 0}</span>
-                                </div>
-                            `).join('')}
-                        </div>
+<div class="chart-container">
+    <svg width="100%" height="110">
+        <!-- 折线路径 -->
+        <path
+            d="${data.scoreTrendFiltered.map((value, index) => {
+                const maxScore = Math.max(...data.scoreTrendFiltered);
+                const minScore = Math.min(...data.scoreTrendFiltered);
+                const x = (index / (data.scoreTrendFiltered.length - 1)) * (275 - 40) + 20;
+                const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
+                return index === 0 ? `M ${x},${y}` : `L ${x},${y}`;
+            }).join('')}"
+            stroke="gray" fill="none" stroke-width="2"
+        />
+
+        <!-- 数据点圆圈和标签 -->
+        ${data.scoreTrendFiltered.map((value, index) => {
+            const maxScore = Math.max(...data.scoreTrendFiltered);
+            const minScore = Math.min(...data.scoreTrendFiltered);
+            const x = (index / (data.scoreTrendFiltered.length - 1)) * (275 - 40) + 20;
+            const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
+            return `
+                <circle cx="${x}" cy="${y}" r="3" fill="#00a1d6"/>
+                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray">${new Date(data.scoreTrendTimeFiltered[index] * 1000).toISOString().slice(5, 10)}</text>
+                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray">${value}</text>
+            `;
+        }).join('')}
+    </svg>
+</div>
                         <h5>平均分变化统计（未过滤）</h5>
-                        <div class="chart-container">
-                            ${[0,1,2,3,4,5,6,7].map(score => `
-                                <div class="bar-item">
-                                    <div class="bar" style="height: ${50 * (data.scoreTrend[score] - Math.min(...Object.values(data.scoreTrend))) / (Math.max(...Object.values(data.scoreTrend)) - Math.min(...Object.values(data.scoreTrend))) || 0}px"></div>
-                                    <span>${new Date(data.scoreTrendTime[score] * 1000).toISOString().slice(5, 10)}<br>${data.scoreTrend[score] || 0}</span>
-                                </div>
-                            `).join('')}
-                        </div>
+<div class="chart-container">
+    <svg width="100%" height="110">
+        <!-- 折线路径 -->
+        <path
+            d="${data.scoreTrend.map((value, index) => {
+                const maxScore = Math.max(...data.scoreTrend);
+                const minScore = Math.min(...data.scoreTrend);
+                const x = (index / (data.scoreTrend.length - 1)) * (275 - 40) + 20;
+                const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
+                return index === 0 ? `M ${x},${y}` : `L ${x},${y}`;
+            }).join('')}"
+            stroke="gray" fill="none" stroke-width="2"
+        />
+
+        <!-- 数据点圆圈和标签 -->
+        ${data.scoreTrend.map((value, index) => {
+            const maxScore = Math.max(...data.scoreTrend);
+            const minScore = Math.min(...data.scoreTrend);
+            const x = (index / (data.scoreTrend.length - 1)) * (275 - 40) + 20;
+            const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
+            return `
+                <circle cx="${x}" cy="${y}" r="3" fill="#00a1d6"/>
+                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray">${new Date(data.scoreTrendTime[index] * 1000).toISOString().slice(5, 10)}</text>
+                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray">${value}</text>
+            `;
+        }).join('')}
+    </svg>
+</div>
                     </div>
                 </div>
             `;
@@ -530,12 +584,14 @@
                 total_samples_filtered: totalScoresFiltered.length,
                 total_probability: (100*calculateProbability(totalScores, this.metadata.official_count)).toFixed(2),
                 total_probability_filtered: (100*calculateProbability(totalScoresFiltered, this.metadata.official_count)).toFixed(2),
+                short_official_count: this.totalCount.short,
                 short_avg: calcAvg(this.shortScores),
                 short_avg_filtered: calcAvg(this.shortScoresFiltered),
                 short_samples: this.shortScores.length,
                 short_samples_filtered: this.shortScoresFiltered.length,
                 short_probability: (100*calculateProbability(this.shortScores, this.totalCount.short)).toFixed(2),
                 short_probability_filtered: (100*calculateProbability(this.shortScoresFiltered, this.totalCount.short)).toFixed(2),
+                long_official_count: this.totalCount.long,
                 long_avg: calcAvg(this.longScores),
                 long_avg_filtered: calcAvg(this.longScoresFiltered),
                 long_samples: this.longScores.length,
@@ -598,7 +654,39 @@
             padding: 20px;
             max-height: 90vh;
             overflow-y: auto;
+            /* 隐藏默认滚动条 */
+           scrollbar-width: none; /* Firefox （但无法自定义样式） */
+           -ms-overflow-style: none; /* IE/Edge */
         }
+
+         /* 2. Webkit 浏览器滚动条样式（Chrome/Safari/Edge） */
+         .control-panel::-webkit-scrollbar {
+             width: 8px; /* 滚动条宽度 */
+             height: 8px; /* 水平滚动条高度（垂直时不常用） */
+         }
+
+         /* 3. 滚动条轨道（背景） */
+         .control-panel::-webkit-scrollbar-track {
+             background: #f1f1f1; /* 轨道背景颜色 */
+             border-radius: 4px; /* 圆角 */
+             /* 可选：轨道阴影 */
+             box-shadow: inset 0 0 3px rgba(0,0,0,0.1);
+         }
+
+         /* 4. 滚动条滑块（拖动部分） */
+         .control-panel::-webkit-scrollbar-thumb {
+             background: gray; /* 滑块颜色 */
+             border-radius: 4px; /* 圆角 */
+             /* 阴影效果 */
+             box-shadow: inset 0 0 3px white;
+             /* 过渡动画 */
+             transition: background 0.3s ease;
+         }
+
+         /* 5. 滑块悬停效果 */
+         .control-panel::-webkit-scrollbar-thumb:hover {
+             background: #666; /* 悬停时颜色 */
+         }
 
         .panel-header {
             display: flex;
@@ -687,7 +775,31 @@
         }
 
         span,p {
+            margin: auto;
+        }
+
+        span {
             font-size: smaller;
+        }
+
+        p.label {
+            font-size: smaller;
+            font-weight: lighter;
+            margin-top: 4px;
+        }
+
+        p.value {
+            font-size: bigger;
+            font-weight: bold;
+            text-align: right;
+        }
+
+        p.value.unfiltered {
+            font-size: smaller;
+            font-weight: bold;
+            text-align: right;
+            text-decoration: line-through;
+            color: gray;
         }
 
         .score-distribution {
@@ -727,6 +839,40 @@
             margin-top: 5px;
             font-size: 12px;
             color: #666;
+        }
+
+        svg path {
+            stroke-linecap: round;
+            stroke-linejoin: round;
+        }
+
+        svg text {
+            font-family: Arial, sans-serif;
+            font-size: 12px;
+            dominant-baseline: central;
+        }
+
+        svg text::-moz-selection {
+            fill: white;
+        }
+
+        svg text::selection {
+            fill: white;
+        }
+
+        svg circle:hover {
+            fill: #0087b3;
+            cursor: pointer;
+        }
+
+        .control-panel *::selection {
+            color: white;
+            background: #0087b3;
+        }
+
+        .control-panel *::-moz-selection {
+            color: white;
+            background: #0087b3;
         }
     `);
 
