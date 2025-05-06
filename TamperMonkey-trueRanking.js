@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.5.1
+// @version      1.5.2
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -46,6 +46,8 @@
                     <div class="input-group">
                         <label>输入MD/EP ID或链接：</label>
                         <input type="text" id="bInput" class="b-input" placeholder="md123456 或 B站链接">
+                        <label>输入过滤等级：</label>
+                        <input type="number" min="0" max="6" step="1" oninput="this.value = Math.max(0, Math.min(6, parseInt(this.value) || 5));" id="fInput" class="b-input" placeholder="过滤B站等级小于过滤等级的评论" value="5">
                     </div>
                     <button class="start-btn" id="start-btn">开始统计</button>
                     <div class="progress-area"></div>
@@ -77,31 +79,40 @@
 
         autoFillInput() {
             const currentUrl = window.location.href;
-            const input = this.panel.querySelector('#bInput');
-            
+            const bInput = this.panel.querySelector('#bInput');
+            const fInput = this.panel.querySelector('#fInput');
+
+            fInput.value = GM_getValue("FILTER_LIMIT") || 5;
+            // 监听 input 事件（实时触发）
+            fInput.addEventListener('input', function() {
+                const inputValue = this.value;
+                GM_setValue('FILTER_LIMIT', inputValue);
+                console.log('已保存过滤等级:', inputValue);
+            });
+
             const mdMatch = currentUrl.match(/(\/md|md)(\d+)/i);
             const epMatch = currentUrl.match(/(\/ep|ep)(\d+)/i);
             const ssMatch = currentUrl.match(/(\/ss|ss)(\d+)/i);
-        
+
             // 清空原有内容
-            input.value = '正在获取md号...';
-            
+            bInput.value = '正在获取md号...';
+
             if (mdMatch) {
                 this.currentMd = mdMatch[2];
-                input.value = `md${this.currentMd}`;
+                bInput.value = `md${this.currentMd}`;
                 this.loadSavedData();
             } else if (epMatch) {
                 this.epToMd(`https://www.bilibili.com/bangumi/play/ep${epMatch[2]}`)
                     .then(md => {
                         this.currentMd = md.replace('md', '');
-                        input.value = md;
+                        bInput.value = md;
                         this.loadSavedData();
                     });
             } else if (ssMatch) {
                 this.epToMd(`https://www.bilibili.com/bangumi/play/ss${ssMatch[2]}`)
                     .then(md => {
                         this.currentMd = md.replace('md', '');
-                        input.value = md;
+                        bInput.value = md;
                         this.loadSavedData();
                     });
             }
@@ -136,14 +147,15 @@
 
             this.panel.querySelector('#start-btn').innerHTML = '正在统计';
             this.panel.querySelector('#start-btn').style = 'pointer-events: none; background: gray;';
-            const input = this.panel.querySelector('#bInput').value.trim();
-            if (!input) {
+            const bInput = this.panel.querySelector('#bInput').value.trim();
+            const fInput = this.panel.querySelector('#fInput').value.trim();
+            if (!bInput) {
                 this.showMessage('输入不能为空！', 'error');
                 return;
             }
 
             this.clearResults();
-            new BScoreAnalyzer(this).analyze(input);
+            new BScoreAnalyzer(this).analyze(bInput, fInput);
         }
 
         showMessage(message, type = 'info') {
@@ -157,7 +169,7 @@
         updateProgress(type, progress, current, total) {
             const progressArea = this.panel.querySelector('.progress-area');
             const existing = progressArea.querySelector(`.${type}-progress`);
-            
+
             if (existing) {
                 existing.innerHTML = `${type}进度：${progress}% (${current}/${total})`;
             } else {
@@ -322,9 +334,10 @@
             this.filterLevel = 5;
         }
 
-        async analyze(input) {
+        async analyze(bInput, fInput) {
             try {
-                const mdId = await this.processInput(input);
+                this.filterLevel = fInput;
+                const mdId = await this.processInput(bInput);
                 this.mdId = mdId;
                 if (!mdId) return;
 
@@ -339,7 +352,7 @@
 
         async processInput(input) {
             let mdId = input.replace(/#| |番剧评分| /g, "");
-            
+
             if (mdId.match(/^(https?:)/)) {
                 const epId = mdId.match(/ep(\d+)/)?.[1];
                 if (epId) return this.ep2md(epId);
@@ -359,7 +372,7 @@
         async fetchBaseInfo(mdId) {
             const res = await fetch(`https://api.bilibili.com/pgc/review/user?media_id=${mdId}`);
             const data = await res.json();
-            
+
             this.metadata = {
                 title: data.result.media.title,
                 official_score: data.result.media.rating?.score || "暂无",
@@ -370,22 +383,22 @@
         async fetchReviews(type, mdId) {
             let cursor;
             let collected = 0;
-            
+
             do {
                 const result = await this.getReviewPage(type, mdId, cursor);
                 if (!result?.data?.list) break;
 
                 const scores = result.data.list.map(item => [item.score, item.author.level, item.ctime]);
                 type === 'short' ? this.shortScores.push(...scores) : this.longScores.push(...scores);
-                
+
                 collected += result.data.list.length;
                 this.totalCount[type] = result.data.total || this.totalCount[type];
-                
+
                 const progress = ((collected / this.totalCount[type]) * 100).toFixed(1);
                 this.ui.updateProgress(type, progress, collected, this.totalCount[type]);
 
                 if (cursor && cursor == result.data.next) break;
-                
+
                 cursor = result.data.next;
                 await this.delay(200);
             } while (cursor && cursor !== "0");
