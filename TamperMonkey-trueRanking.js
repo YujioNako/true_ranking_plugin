@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.5.2
+// @version      1.5.3
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -22,6 +22,7 @@
     class ControlPanel {
         constructor() {
             this.isOpen = false;
+            this.currentUrl = "";
             this.currentMd = null;
             this.createUI();
             this.bindEvents();
@@ -57,6 +58,15 @@
 
             document.body.appendChild(this.toggleBtn);
             document.body.appendChild(this.panel);
+
+            const fInput = this.panel.querySelector('#fInput');
+            fInput.value = GM_getValue("FILTER_LIMIT") || 5;
+            // 监听 input 事件（实时触发）
+            fInput.addEventListener('input', function() {
+                const inputValue = this.value;
+                GM_setValue('FILTER_LIMIT', inputValue);
+                console.log('已保存过滤等级:', inputValue);
+            });
         }
 
         bindEvents() {
@@ -78,21 +88,16 @@
         }
 
         autoFillInput() {
-            const currentUrl = window.location.href;
+            if(this.currentUrl !== window.location.href) {
+                this.currentUrl = window.location.href;
+            } else {
+                return;
+            }
             const bInput = this.panel.querySelector('#bInput');
-            const fInput = this.panel.querySelector('#fInput');
 
-            fInput.value = GM_getValue("FILTER_LIMIT") || 5;
-            // 监听 input 事件（实时触发）
-            fInput.addEventListener('input', function() {
-                const inputValue = this.value;
-                GM_setValue('FILTER_LIMIT', inputValue);
-                console.log('已保存过滤等级:', inputValue);
-            });
-
-            const mdMatch = currentUrl.match(/(\/md|md)(\d+)/i);
-            const epMatch = currentUrl.match(/(\/ep|ep)(\d+)/i);
-            const ssMatch = currentUrl.match(/(\/ss|ss)(\d+)/i);
+            const mdMatch = this.currentUrl.match(/(\/md|md)(\d+)/i);
+            const epMatch = this.currentUrl.match(/(\/ep|ep)(\d+)/i);
+            const ssMatch = this.currentUrl.match(/(\/ss|ss)(\d+)/i);
 
             // 清空原有内容
             bInput.value = '正在获取md号...';
