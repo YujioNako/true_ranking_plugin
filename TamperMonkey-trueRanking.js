@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         B站番剧评分统计
 // @namespace    https://pro-ivan.com/
-// @version      1.5.3
+// @version      1.5.4
 // @description  自动统计B站番剧评分，支持短评/长评综合统计
 // @author       YujioNako & 看你看过的霓虹
 // @match        https://www.bilibili.com/bangumi/*
@@ -238,7 +238,7 @@
                         <h5>分数分布统计</h5>
                         <div class="chart-container">
                             ${Object.keys(data.scoreDistributionFiltered).map(score => `
-                                <div class="bar-item">
+                                <div class="bar-item opacityItem">
                                     <div class="bar" style="height: ${50 * data.scoreDistributionFiltered[score] / Math.max(...Object.values(data.scoreDistributionFiltered)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistributionFiltered[score] || 0}%)</span>
                                 </div>
@@ -247,7 +247,7 @@
                         <h5>分数分布统计（未过滤）</h5>
                         <div class="chart-container">
                             ${Object.keys(data.scoreDistribution).map(score => `
-                                <div class="bar-item">
+                                <div class="bar-item opacityItem">
                                     <div class="bar" style="height: ${50 * data.scoreDistribution[score] / Math.max(...Object.values(data.scoreDistribution)) || 0}px"></div>
                                     <span>${score}分<br>${data.scoreDistributionNum[score] || 0}<br>(${data.scoreDistribution[score] || 0}%)</span>
                                 </div>
@@ -278,8 +278,8 @@
             const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
             return `
                 <circle cx="${x}" cy="${y}" r="3" fill="#00a1d6"/>
-                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray">${new Date(data.scoreTrendTimeFiltered[index] * 1000).toISOString().slice(5, 10)}</text>
-                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray">${value}</text>
+                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray" class="opacityItem">${new Date(data.scoreTrendTimeFiltered[index] * 1000).toISOString().slice(2, 10).replace(/-/g, "/")}</text>
+                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray" class="opacityItem">${value}</text>
             `;
         }).join('')}
     </svg>
@@ -307,8 +307,8 @@
             const y = 90 - ((value - minScore)/(maxScore - minScore) * 70);
             return `
                 <circle cx="${x}" cy="${y}" r="3" fill="#00a1d6"/>
-                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray">${new Date(data.scoreTrendTime[index] * 1000).toISOString().slice(5, 10)}</text>
-                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray">${value}</text>
+                <text x="${x}" y="${y+10}" text-anchor="middle" fill="gray" class="opacityItem">${new Date(data.scoreTrendTime[index] * 1000).toISOString().slice(2, 10).replace(/-/g, "/")}</text>
+                <text x="${x}" y="${y-10}" text-anchor="middle" fill="gray" class="opacityItem">${value}</text>
             `;
         }).join('')}
     </svg>
@@ -528,47 +528,39 @@
                 const times = data.map(item => item[2]);
                 const minTime = Math.min(...times);
                 const maxTime = Math.max(...times);
-                const totalSpan = maxTime - minTime;
+                const totalSpanOriginal = maxTime - minTime;
+                const twoYearsInMs = 2 * 365 * 24 * 60 * 60; // 2年的秒数
+                const adjustedMaxTime = totalSpanOriginal > twoYearsInMs ? minTime + twoYearsInMs : maxTime;
+                const totalSpan = adjustedMaxTime - minTime;
 
                 if (totalSpan === 0) {
-                    // 所有时戳相同，返回所有评分的平均值
+                    // 所有时间戳相同，返回平均值
                     const avg = data.reduce((sum, item) => sum + item[0], 0) / data.length;
-                    return Array(8).fill(avg);
+                    return Array(8).fill(avg.toFixed(2));
                 }
 
-                // 初始化8个时间段的统计
+                // 初始化8个区间
                 const intervals = Array(8).fill(0).map(() => ({ sum: 0, count: 0 }));
                 const intervalLength = totalSpan / 8;
 
+                // 处理每个数据项
                 for (const item of data) {
                     const timestamp = item[2];
+                    if (timestamp > adjustedMaxTime) continue; // 跳过超过2年的评论
                     const score = item[0];
-
-                    // 计算属于哪个时间段
                     let intervalIndex = Math.floor((timestamp - minTime) / intervalLength);
-                    if (intervalIndex >= 8) intervalIndex = 7;
-
+                    if (intervalIndex >= 8) intervalIndex = 7; // 确保索引不超过7
                     intervals[intervalIndex].sum += score;
                     intervals[intervalIndex].count += 1;
                 }
 
-                // 修改后的累积平均分计算
+                // 计算累积平均分
                 return intervals.reduce((acc, interval, index) => {
-                    // 累加当前段的sum和count
                     const prev = acc[index - 1] || { cumulativeSum: 0, cumulativeCount: 0 };
                     const cumulativeSum = prev.cumulativeSum + interval.sum;
                     const cumulativeCount = prev.cumulativeCount + interval.count;
-
-                    // 计算并保存当前累积平均值
-                    const avg = cumulativeCount > 0
-                    ? (cumulativeSum / cumulativeCount).toFixed(2)
-                    : '0.0';
-
-                    return [...acc, {
-                        cumulativeSum,
-                        cumulativeCount,
-                        avg
-                    }];
+                    const avg = cumulativeCount > 0 ? (cumulativeSum / cumulativeCount).toFixed(2) : '0.0';
+                    return [...acc, { cumulativeSum, cumulativeCount, avg }];
                 }, []).map(item => item.avg);
             }
 
@@ -579,15 +571,16 @@
                 const times = data.map(item => item[2]);
                 const minTime = Math.min(...times);
                 const maxTime = Math.max(...times);
-                const totalSpan = maxTime - minTime;
+                const totalSpanOriginal = maxTime - minTime;
+                const twoYearsInMs = 2 * 365 * 24 * 60 * 60; // 2年的秒数
+                const adjustedMaxTime = totalSpanOriginal > twoYearsInMs ? minTime + twoYearsInMs : maxTime;
+                const totalSpan = adjustedMaxTime - minTime;
 
                 if (totalSpan === 0) {
-                    // 所有时戳相同，返回minTime
-                    return Array(8).fill(minTime);
+                    // 所有时间戳相同，返回minTime
+                    return Array(8).fill(minTime.toFixed(0));
                 }
 
-                // 初始化8个时间段的统计
-                const intervals = Array(8).fill(0).map(() => ({ sum: 0, count: 0 }));
                 const intervalLength = totalSpan / 8;
                 return Array.from({length: 8}, (_, i) => (minTime + (i+1)*intervalLength).toFixed(0));
             }
@@ -857,6 +850,14 @@
             margin-top: 5px;
             font-size: 12px;
             color: #666;
+        }
+
+        .opacityItem {
+            opacity: 0.6;
+        }
+
+        .opacityItem:hover {
+            opacity: 1.0;
         }
 
         svg path {
