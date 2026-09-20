@@ -5,7 +5,8 @@ import { randomUUID } from 'node:crypto'
 
 // 单文件安装：复制到 Yunzai 的 plugins/example/true_ranking.js 后重启。
 // 模板自动生成，图片由宿主 lib/puppeteer/puppeteer.js 负责渲染和消息封装。
-// 如有需要，在机器人进程环境中设置 BILIBILI_COOKIE；不要通过群聊提交 Cookie。
+// 每次查询读取 data/cha_chengfen/bilibili_cookies.txt；BILIBILI_COOKIE 可覆盖。
+// BILIBILI_COOKIE_FILE 可指定其他文件；不要通过群聊提交 Cookie。
 const CONFIG = Object.freeze({ filterLevel: 5, requestInterval: 1200, timeout: 30000, maxPages: 3000 })
 const SCORES = [2, 4, 6, 8, 10]
 const activeUsers = new Set()
@@ -45,10 +46,35 @@ function parseTarget(input) {
   throw new Error('请输入有效的 MD / EP / SS 编号或番剧分享链接。')
 }
 
+async function loadCookie(options = {}) {
+  const validate = value => {
+    if (typeof value !== 'string' || /[\r\n]/.test(value.trim())) throw new Error('B 站 Cookie 配置格式无效，请管理员检查。')
+    return value.trim()
+  }
+  if (options.cookie !== undefined) return validate(options.cookie)
+  if (process.env.BILIBILI_COOKIE) return validate(process.env.BILIBILI_COOKIE)
+  const configuredFile = options.cookieFile ?? process.env.BILIBILI_COOKIE_FILE
+  const file = configuredFile || path.join(process.cwd(),'data','cha_chengfen','bilibili_cookies.txt')
+  let handle
+  try {
+    handle = await fs.open(file,'r')
+    // Read a bounded amount, including when another plugin refreshes the file.
+    const buffer = Buffer.alloc(65537)
+    const { bytesRead } = await handle.read(buffer,0,buffer.length,0)
+    if (bytesRead > 65536) throw new Error('B 站 Cookie 文件过大，请管理员检查。')
+    const value = validate(buffer.subarray(0,bytesRead).toString('utf8'))
+    if (!value || !value.includes('=') || value === '{}') throw new Error('B 站 Cookie 文件为空或尚未配置，请先更新「查成分」的 Cookie。')
+    return value
+  } catch (error) {
+    if (error.code === 'ENOENT' && !configuredFile) return ''
+    if (error.code) throw new Error('无法读取 B 站 Cookie 文件，请管理员检查路径和权限。')
+    throw error
+  } finally { await handle?.close() }
+}
+
 async function createClient(options = {}) {
   const fetcher = options.fetchImpl || globalThis.fetch || (await import('node-fetch')).default
-  const cookie = options.cookie ?? process.env.BILIBILI_COOKIE ?? ''
-  if (/[\r\n]/.test(cookie)) throw new Error('BILIBILI_COOKIE 配置格式无效，请管理员检查。')
+  const cookie = await loadCookie(options)
   const interval = options.interval ?? CONFIG.requestInterval
   let nextRequestAt = 0
   async function get(url, useCookie, handler) {
@@ -60,7 +86,7 @@ async function createClient(options = {}) {
       const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.bilibili.com/' }
       if (useCookie && cookie) headers.Cookie = cookie
       const response = await fetcher(url, { method: 'GET', headers, redirect: 'manual', signal: controller.signal })
-      if ([412,429].includes(response.status)) throw new Error(`B 站触发风控（HTTP ${response.status}），本次统计停止；请稍后再试。管理员可检查机器人网络和 BILIBILI_COOKIE，登录不保证解除风控。`)
+      if ([412,429].includes(response.status)) throw new Error(`B 站触发风控（HTTP ${response.status}），本次统计停止；请稍后再试。管理员可检查机器人网络和 B 站 Cookie 配置，登录不保证解除风控。`)
       if ([401,403].includes(response.status)) throw new Error(`B 站拒绝访问（HTTP ${response.status}），请管理员检查登录会话及访问权限。`)
       return await handler(response)
     } catch (error) {
@@ -80,7 +106,7 @@ async function createClient(options = {}) {
         try { result = await response.json() } catch { throw new Error('B 站未返回有效 JSON，可能需要处理站内验证。') }
         if (!result || typeof result.code !== 'number') throw new Error('B 站接口数据结构异常。')
         if ([-412,-509].includes(result.code)) throw new Error(`B 站触发风控（${result.code}），本次统计停止，请稍后再试。`)
-        if (result.code === -101) throw new Error('B 站登录会话失效，请管理员检查 BILIBILI_COOKIE。')
+        if (result.code === -101) throw new Error('B 站登录会话失效，请管理员更新共享 Cookie 文件或 BILIBILI_COOKIE。')
         if (result.code !== 0) throw new Error(`B 站接口返回错误码 ${result.code}，统计未完成。`)
         return result
       })

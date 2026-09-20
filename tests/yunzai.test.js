@@ -60,6 +60,28 @@ test('Bilibili cookies go only to fixed API requests, never short links or redir
   const unsafe=await bot.createClient({interval:0,fetchImpl:async()=>({status:302,headers:{get:()=> 'http://127.0.0.1/private'}})})
   await assert.rejects(unsafe.expand('https://b23.tv/abc'),/只接受/)
 })
+test('shared Cookie file is read for every query and environment overrides are explicit',async t=>{
+  const previousCwd=process.cwd(),previousCookie=process.env.BILIBILI_COOKIE,previousFile=process.env.BILIBILI_COOKIE_FILE;
+  process.chdir(host.root);delete process.env.BILIBILI_COOKIE;delete process.env.BILIBILI_COOKIE_FILE;
+  const file=path.join(host.root,'data/cha_chengfen/bilibili_cookies.txt');
+  t.after(async()=>{process.chdir(previousCwd);if(previousCookie===undefined)delete process.env.BILIBILI_COOKIE;else process.env.BILIBILI_COOKIE=previousCookie;if(previousFile===undefined)delete process.env.BILIBILI_COOKIE_FILE;else process.env.BILIBILI_COOKIE_FILE=previousFile;await fs.rm(file,{force:true});});
+  assert.equal(await bot.loadCookie(),'');
+  await fs.mkdir(path.dirname(file),{recursive:true});await fs.writeFile(file,'SESSDATA=first-test-value; bili_jct=test\n');
+  const requests=[],fetchImpl=async(url,options)=>{requests.push(options.headers.Cookie);return{ok:true,status:200,json:async()=>({code:0})};};
+  const first=await bot.createClient({interval:0,fetchImpl});await first.request('/pgc/review/user?media_id=1');
+  await fs.writeFile(file,'SESSDATA=refreshed-test-value');
+  const second=await bot.createClient({interval:0,fetchImpl});await second.request('/pgc/review/user?media_id=1');
+  assert.deepEqual(requests,['SESSDATA=first-test-value; bili_jct=test','SESSDATA=refreshed-test-value']);
+  process.env.BILIBILI_COOKIE='SESSDATA=override';assert.equal(await bot.loadCookie(),'SESSDATA=override');assert.equal(await bot.loadCookie({cookie:''}),'');
+  delete process.env.BILIBILI_COOKIE;process.env.BILIBILI_COOKIE_FILE=file;assert.equal(await bot.loadCookie(),'SESSDATA=refreshed-test-value');
+  for(const value of ['','{}','SESSDATA=test\nInjected: secret-test']){
+    await fs.writeFile(file,value);await assert.rejects(bot.loadCookie(),error=>!error.message.includes('secret-test')&&/Cookie/.test(error.message));
+  }
+  await fs.writeFile(file,'x'.repeat(65537));await assert.rejects(bot.loadCookie(),/过大/);
+  process.env.BILIBILI_COOKIE_FILE=path.join(host.root,'missing-secret-path');
+  await assert.rejects(bot.loadCookie(),error=>/无法读取/.test(error.message)&&!error.message.includes('missing-secret-path'));
+});
+
 test('HTTP 412 stops analysis instead of producing a success image from partial data',async()=>{
   let calls=0
   const client=await bot.createClient({interval:0,cookie:'secret-value',fetchImpl:async()=>{calls++;return{status:412}}})

@@ -17,7 +17,7 @@ export async function loadYunzaiPlugin() {
   const source = await fs.readFile(new URL('../../true_ranking.js',import.meta.url),'utf8');
   // Only the plugin class may be exported in production: Yunzai constructs all
   // exported functions as plugins. Expose helpers only in this isolated copy.
-  await fs.writeFile(file,source+'\nexport {CONFIG,parseCommand,parseTarget,createClient,collectReviews,analyze,summarize,filterRows,trend,probability,buildPanelHtml,buildTextResult,renderPanel};\n');
+  await fs.writeFile(file,source+'\nexport {CONFIG,parseCommand,parseTarget,loadCookie,createClient,collectReviews,analyze,summarize,filterRows,trend,probability,buildPanelHtml,buildTextResult,renderPanel};\n');
   const module = await import(pathToFileURL(file).href);
   return {module,root,source,cleanup:()=>{
     const resolved=path.resolve(root),temporary=path.resolve(os.tmpdir())+path.sep;
