@@ -7,7 +7,7 @@
 
 **[打开 True Ranking 番剧评分观察室](https://yujionako.github.io/true_ranking_plugin/)**
 
-纯静态应用位于 `docs/`，支持 GitHub Pages，无构建依赖，不需要配置密钥。原有三个脚本保持不变。
+纯静态应用位于 `docs/`，支持 GitHub Pages，无构建依赖，不需要配置密钥。网页、油猴、控制台和 Yunzai 图片版均可独立使用。
 
 ### 实时统计
 
@@ -41,9 +41,34 @@ GitHub Pages 不能直接跨域读取 B 站 API。连接助手通过 Tampermonke
 
 ## 使用方法
 ### Yunzai版
-将`true_ranking.js`扔进/plugins/example后配置相关参数后重启即可使用
+将 [`true_ranking.js`](./true_ranking.js) 复制到机器人的 `plugins/example/true_ranking.js`，替换旧版本后重启。仍是单文件插件，不需要复制 `docs/`、测试文件或手工安装 HTML 模板。
 
-使用方法参考 #番剧评分帮助
+默认发送类似油猴面板的 **PNG 图片**，包括：官方评分、过滤前后计算均分、样本数、短评/长评明细、两组分数分布、两年累计均分趋势，以及原脚本模型估计说明。图片模板首次运行时自动生成在机器人 `data/true-ranking/` 中。
+
+```text
+#番剧评分 md4315402
+#番剧评分 4315402
+#番剧评分 ep705756
+#番剧评分 ss26257
+#番剧评分 https://www.bilibili.com/bangumi/media/md4315402
+#番剧评分 md4315402 等级5
+#番剧评分 md4315402 等级0
+#番剧评分帮助
+```
+
+- 最低等级默认 5，可指定 0–6；`等级0` 不按等级过滤。全部样本的评分口径与旧版保持一致。缺失等级的有效评分仍计入全部样本与 Lv.0，但不进入更高等级的过滤结果；缺失日期不进入趋势。
+- 支持完整番剧链接和 `b23.tv` 分享链接。解析分享链接不发送 Cookie，并检查每次重定向目标。
+- 使用宿主的 `lib/puppeteer/puppeteer.js` 截图接口，适用于提供该兼容接口的 Yunzai V3 / Miao-Yunzai。需要机器人本身的 Chromium / Puppeteer 可正常截图；Linux 建议安装中文字体，如 Noto Sans CJK。**截图或图片发送失败会自动回退文字结果**。
+- 推荐 Node.js 18+；更早的宿主需要自带 `node-fetch`。插件不再绑定特定的 `oicq` / `icqq` 消息库，由宿主截图组件返回图片消息。
+- 每次统计使用独立数据，避免多人查询混入另一部番剧结果。同一用户的重复请求会提示等待；分页按评论 ID 去重，风控或分页异常时明确报错，不把未完成的采集伪装为成功。
+- 默认请求间隔 1200 ms、单次超时 30 秒；可在文件顶部 `CONFIG` 中调整。评论多的番剧可能需要数分钟。
+
+如果机器人遇到 412 或登录失效，可由管理员在**机器人进程的环境变量**中配置 `BILIBILI_COOKIE` 并重启。服务器不能继承查询用户浏览器里的 B 站登录状态；不要在群聊、源码仓库或截图中放 Cookie。插件只向固定 B 站 API 发送该配置，且不会打印它。登录不保证解除 B 站的频率或网络风控。
+
+图片布局预览（模拟数据）：
+
+![Yunzai 评分面板布局示例](./examples/yunzai-panel-preview.png)
+
 ### 油猴脚本
 将`TamperMonkey-trueRanking.js`导入油猴后，在任意番剧页面通过右侧按钮打开面板使用
 
@@ -63,7 +88,7 @@ GitHub Pages 不能直接跨域读取 B 站 API。连接助手通过 Tampermonke
 
 对于Yunzai版的用户，针对报错fetch is not defined，可以参考这个>>>https://github.com/ldcivan/Yunzai_imgSearcher/issues/3
 ## 示例
-### Yunzai版
+### Yunzai 旧版文字输出（历史示例）
 <img src="https://i0.hdslb.com/bfs/new_dyn/ca832d860bc9bdc7431fb641864b713711022578.jpg@1554w.webp" width=50%>
 
 ### 油猴脚本
