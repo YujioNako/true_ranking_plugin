@@ -6,6 +6,7 @@
   <meta name="theme-color" content="#101a2e">
   <title>True Ranking · 番剧评分观察室</title>
   <link rel="icon" href="./favicon.svg" type="image/svg+xml"><link rel="stylesheet" href="./style.css">
+  <link rel="stylesheet" href="./statistics.css">
   <script type="module" src="./app.js"></script>
 </head>
 <body>
@@ -31,10 +32,11 @@
       <div class="main-column">
         <section class="panel result-header"><div><p class="eyebrow" id="result-tag">ANALYSIS WORKSPACE</p><h2 id="result-title">等待一部番剧</h2><p id="result-meta" class="hint">统计完成后，在这里查看评分、样本与趋势。</p></div><a id="bili-link" class="secondary" target="_blank" rel="noreferrer" hidden>在 B 站查看 ↗</a></section>
         <section class="metrics" aria-label="评分概览"><article class="metric accent"><p>等级过滤后评分</p><div><strong id="filtered-score">—</strong><span>/ 10</span></div><p id="filtered-caption">保留 Lv.5 及以上用户</p></article><article class="metric"><p>全部样本评分</p><div><strong id="all-score">—</strong><span>/ 10</span></div><p>长评与短评按条数合并</p></article><article class="metric"><p>B 站官方评分</p><div><strong id="official-score">—</strong><span>/ 10</span></div><p id="official-count">标称评分人数 —</p></article></section>
-        <section class="panel"><div class="section-heading"><h2>评分分布</h2><div class="legend"><span class="blue">过滤后</span><span class="gray">全部样本</span></div></div><div id="distribution" class="distribution"><p class="empty">暂无评分数据</p></div><div class="sample-strip"><p>已采集 <strong id="all-count">—</strong></p><p>过滤后 <strong id="filtered-count">—</strong></p><p>采集 / 官方标称 <strong id="coverage">—</strong></p></div></section>
+        <section class="panel confidence-panel" aria-labelledby="confidence-title"><div class="section-heading"><h2 id="confidence-title">置信度 · 原脚本模型估计</h2><span class="hint">均值误差 ±0.1 · 保留两位小数</span></div><div id="confidence" class="confidence-grid"><p class="empty">统计完成后显示合并、短评、长评的六项估计</p></div><p class="hint model-note">沿用油猴版公式：随机抽样假设下，均值误差在 ±0.1 内的近似概率。评论不一定是随机样本，过滤后的总体人数也未知，因此这些百分比不能作为准确性保证。</p></section>
+        <section class="panel"><div class="section-heading"><h2>评分分布</h2><div class="legend"><span class="blue">过滤后</span><span class="gray">全部样本</span></div></div><div id="distribution" class="distribution"><p class="empty">暂无评分数据</p></div><div class="sample-strip"><p>已采集 <strong id="all-count">—</strong></p><p>过滤后 <strong id="filtered-count">—</strong></p><p>样本保留率 <strong id="retention">—</strong></p><p>采集 / 官方标称 <strong id="coverage">—</strong></p></div></section>
         <section class="panel"><div class="section-heading"><h2>平均分变化</h2><span class="hint">最早评论起 · 最多两年</span></div><div id="trend" class="trend"><p class="empty">采集完成后显示累计平均分趋势</p></div><details id="trend-detail" hidden><summary>查看趋势数据</summary><div id="trend-table" class="table-wrap"></div></details></section>
         <section class="panel"><div class="section-heading"><h2>长短评明细</h2><span class="hint">分 / 条</span></div><div class="table-wrap"><table><thead><tr><th>评论类型</th><th>全部均分</th><th>过滤后均分</th><th>全部样本</th><th>过滤后样本</th><th>接口标称数</th></tr></thead><tbody id="review-table"><tr><td colspan="6" class="empty">尚无统计结果</td></tr></tbody></table></div></section>
-        <details class="method panel"><summary>计算方法与结果说明</summary><p>沿用原油猴脚本：每条评论等权，合并长短评计算算术平均分；最低用户等级默认 5，可在 0–6 之间调整。两类评论分别去重，同一用户的长评与短评仍分别计数。</p><p>采集结束仅表示接口可见分页已读完，不表示拿到了全部评分。采集 / 官方标称比例使用合并评论数除以官方评分人数，两者口径不同，可能超过 100%。评论并非随机样本，结果仅供参考，不代表客观「真实评分」。</p><p>趋势按每组样本的最早日期起划分 8 个区间，累计计算，超过两年的评论不进入趋势图，但仍计入总均分。</p><p id="probability">原脚本的正态模型估计会在采集后显示。</p><p>模型假设随机抽样，并计算均值误差在 ±0.1 内的近似概率；这些假设在当前评论样本中未得到验证，尤其过滤后的总体人数未知，不能当作置信保证。</p></details>
+        <details class="method panel"><summary>计算方法与结果说明</summary><p>沿用原油猴脚本：每条评论等权，合并长短评计算算术平均分；最低用户等级默认 5，可在 0–6 之间调整。两类评论分别去重，同一用户的长评与短评仍分别计数。</p><p>采集结束仅表示接口可见分页已读完，不表示拿到了全部评分。采集 / 官方标称比例使用合并评论数除以官方评分人数，两者口径不同，可能超过 100%。评论并非随机样本，结果仅供参考，不代表客观「真实评分」。</p><p>趋势按每组样本的最早日期起划分 8 个区间，累计计算，超过两年的评论不进入趋势图，但仍计入总均分。两组的日期范围可能不同；所有评论同一天时显示一个点。</p><p>置信度沿用原脚本的正态近似与有限总体校正：合并样本以官方评分人数为标称数，短评、长评分别以对应接口标称数计算；过滤前后沿用同一个标称数。有效样本不足 2 条、标称数未知或为 0 时显示「暂不可估」。样本数达到标称数或样本评分完全相同时，原公式返回 100%，并不表示结果没有误差。</p><p>标准误 SE = √[s² / n × (N − n) / (N − 1)]，模型概率 = 2Φ(0.1 / SE) − 1。其中 s² 是样本方差，n 是有效样本数，N 是对应标称数，Φ 是标准正态分布的累积分布函数。</p></details>
       </div>
     </div>
   </main>

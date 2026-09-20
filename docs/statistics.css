@@ -1,0 +1,18 @@
+.main-column>.panel{min-width:0}
+.confidence-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.confidence-grid>.empty{grid-column:1/-1;margin:24px 0}
+.confidence-card{border:1px solid var(--line);border-radius:10px;padding:18px;background:#f8faff;min-width:0}
+.confidence-card h3,.trend-series h3{margin:0 0 14px;font-size:.9rem;font-weight:650}
+.confidence-row{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 12px;font-size:.75rem;color:var(--muted)}
+.confidence-row strong{font-size:1.4rem;color:var(--ink);font-variant-numeric:tabular-nums;line-height:1.5}
+.confidence-row.filtered strong{color:var(--blue)}
+.confidence-samples{margin:0 0 14px;font-size:.75rem}
+.confidence-card .population{padding-top:10px;border-top:1px solid var(--line);margin-bottom:0;font-size:.75rem}
+.confidence-card .estimate-note{font-size:.75rem;margin:-6px 0 14px;color:#7b5b22}
+.model-note{margin:16px 0 0}
+.trend-series+.trend-series{border-top:1px solid var(--line);margin-top:18px;padding-top:20px}
+.trend-scroll{max-width:100%;overflow-x:auto;padding:2px}
+.trend-scroll svg{min-width:620px;overflow:hidden}
+.trend svg .trend-value{font-weight:600;fill:var(--ink)}
+@media(min-width:801px) and (max-width:1100px){.confidence-grid{grid-template-columns:1fr}}
+@media(max-width:640px){.confidence-grid{grid-template-columns:1fr}.confidence-card{padding:16px}.confidence-row strong{font-size:1.5rem}}

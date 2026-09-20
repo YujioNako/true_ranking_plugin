@@ -35,6 +35,25 @@ export function probability(rows, population) {
   const y = t * (0.254829592 + t * (-0.284496736 + t * (1.421413741 + t * (-1.453152027 + t * 1.061405429))));
   return Math.max(0, Math.min(1, 1 - y * Math.exp(-x * x)));
 }
+// Keep each denominator identical to the userscript, including after filtering.
+export function confidenceStats(data, level) {
+  return [
+    ['total', '合并长短评', [...data.short, ...data.long], data.officialCount, '官方评分人数'],
+    ['short', '短评', data.short, data.totals.short, '短评接口标称数'],
+    ['long', '长评', data.long, data.totals.long, '长评接口标称数']
+  ].map(([type, label, rows, population, populationLabel]) => {
+    const estimate = samples => {
+      const value = probability(samples, population);
+      let note = '';
+      if (samples.length < 2) note = '有效样本不足 2 条，暂不计算';
+      else if (!Number.isFinite(population) || population <= 0) note = '标称数量未知或为 0，暂不计算';
+      else if (samples.length >= population) note = '样本数达到或超过标称数，原公式返回 100%；不代表没有误差';
+      else if (samples.every(row => row[0] === samples[0][0])) note = '样本评分完全相同，原公式返回 100%；不代表没有误差';
+      return {value, count:samples.length, note};
+    };
+    return {type, label, population, populationLabel, all:estimate(rows), filtered:estimate(filterRows(rows,level))};
+  });
+}
 export function trend(rows) {
   const valid = rows.filter(r => Number.isFinite(r[2]) && r[2] > 0).sort((a, b) => a[2] - b[2]);
   if (!valid.length) return [];

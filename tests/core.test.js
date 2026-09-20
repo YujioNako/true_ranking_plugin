@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {parseInput,filterRows,summarize,trend,probability,validateDataset,normalizeReview} from '../docs/core.js';
+import {parseInput,filterRows,summarize,trend,probability,confidenceStats,validateDataset,normalizeReview} from '../docs/core.js';
 import {collectReviews,analyze,sleep,makeTransport} from '../docs/api.js';
 const rows = [[2,0,100],[6,4,200],[10,5,300],[10,6,400]];
 test('MD/EP/SS inputs and links',() => {
@@ -10,6 +10,32 @@ test('MD/EP/SS inputs and links',() => {
 test('level zero includes everyone, level five filters',() => {assert.equal(filterRows(rows,0).length,4);assert.equal(filterRows(rows,5).length,2);assert.throws(() => filterRows(rows,7));});
 test('means and distributions use separate filtered counts',() => {assert.equal(summarize(rows).average,7);assert.deepEqual(summarize(filterRows(rows,5)).counts,[0,0,0,0,2]);assert.equal(summarize([]).average,null);});
 test('model estimate handles empty and single samples',() => {assert.equal(probability([],100),null);assert.equal(probability([rows[0]],100),null);assert.equal(probability(rows,null),null);assert.equal(probability(rows,4),1);assert.ok(probability(rows,100)>0 && probability(rows,100)<1);});
+
+test('six confidence estimates use the userscript population for each review type',() => {
+  const short=[[2,1,100],[4,5,200],[10,6,300]], long=[[6,0,100],[8,5,200],[10,6,300]];
+  const groups=confidenceStats({short,long,officialCount:1000,totals:{short:20,long:40}},5);
+  const expected=[[[...short,...long],1000],[short,20],[long,40]];
+  groups.forEach((group,i)=>{
+    const [samples,population]=expected[i];
+    assert.equal(group.population,population);
+    assert.equal(group.all.value,probability(samples,population));
+    assert.equal(group.filtered.value,probability(filterRows(samples,5),population));
+    assert.equal(group.filtered.count,i===0?4:2);
+  });
+  // Independent Python math.erf reference: erf(0.1 / sqrt((52/3)/3*(17/19)) / sqrt(2)).
+  assert.ok(Math.abs(groups[1].all.value-0.03508100176423914)<1e-6);
+  const unfiltered=confidenceStats({short,long,officialCount:1000,totals:{short:20,long:40}},0);
+  for(const group of unfiltered) assert.deepEqual(group.all,group.filtered);
+});
+test('confidence explains unavailable, full-count and identical-score estimates',()=>{
+  const groups=confidenceStats({short:[[8,0,100],[8,0,200]],long:[[2,6,100]],officialCount:2,totals:{short:100,long:null}},5);
+  assert.equal(groups[0].all.value,1);assert.match(groups[0].all.note,/达到或超过/);
+  assert.equal(groups[0].filtered.value,null);assert.match(groups[0].filtered.note,/不足/);
+  assert.equal(groups[1].all.value,1);assert.match(groups[1].all.note,/完全相同/);
+  const unknown=confidenceStats({short:rows,long:[],officialCount:null,totals:{short:0,long:null}},0);
+  assert.equal(unknown[0].all.value,null);assert.match(unknown[0].all.note,/未知/);
+  assert.equal(unknown[1].all.value,null);assert.equal(unknown[2].all.value,null);
+});
 test('trend handles single date and excludes samples after two years',() => {assert.deepEqual(trend([[10,5,100],[2,5,100]]),[{time:100,average:6}]);const result=trend([[2,5,100],[10,5,100+3*365*86400]]);assert.equal(result.at(-1).average,2);assert.equal(result.length,8);assert.deepEqual(trend([]),[]);});
 test('invalid rows rejected, unknown levels never default to high level',() => {assert.equal(normalizeReview({score:10,ctime:100}),null);assert.equal(normalizeReview({score:7,ctime:100,author:{level:5}}),null);});
 const dataset = {version:1,mediaId:'123',title:'测试',timestamp:new Date().toISOString(),short:rows,long:[],totals:{short:4,long:0},officialScore:7,officialCount:4,complete:true};
