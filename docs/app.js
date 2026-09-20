@@ -1,5 +1,5 @@
 import {SCORES, parseInput, summarize, filterRows, trend, probability, validateDataset} from './core.js';
-import {bridgeCall, makeTransport, analyze} from './api.js';
+import {bridgeCall, makeTransport, analyze, assertSessionBridge} from './api.js';
 const $ = id => document.getElementById(id);
 const fmt = n => n == null ? '—' : n.toLocaleString('zh-CN');
 const score = n => n == null ? '—' : n.toFixed(1);
@@ -15,15 +15,25 @@ try {
 function status(message, error = false) { $('status').textContent = message; $('status').className = error ? 'error' : ''; }
 function element(tag, text, className) { const el = document.createElement(tag); if (text != null) el.textContent = text; if (className) el.className = className; return el; }
 function setBusy(busy) {
-  for (const id of ['start','media-input','connection-mode','proxy-url','import-button']) $(id).disabled = busy;
+  for (const id of ['start','media-input','connection-mode','proxy-url','import-button','check-session']) $(id).disabled = busy;
   $('cancel').hidden = !busy; $('start').textContent = busy ? '正在统计…' : '开始统计 →';
   $('progress').hidden = !busy;
   renderHistory();
 }
 async function detect() {
   $('bridge-status').textContent = '正在检测连接助手…';
-  try { await bridgeCall('ping'); $('bridge-status').textContent = '连接助手已就绪'; }
-  catch { $('bridge-status').textContent = '未检测到助手 · 安装后刷新本页'; }
+  try { const info = assertSessionBridge(await bridgeCall('ping')); $('bridge-status').textContent = `连接助手 ${info.version} 已就绪${info.cooldownSeconds ? ` · 风控等待 ${info.cooldownSeconds} 秒` : ''}`; }
+  catch (error) { $('bridge-status').textContent = error.message; }
+}
+async function checkSession() {
+  $('check-session').disabled = true;
+  $('session-status').textContent = '正在向 B 站确认登录状态…';
+  try {
+    assertSessionBridge(await bridgeCall('ping'));
+    const session = await bridgeCall('session');
+    $('session-status').textContent = session.loggedIn ? 'B 站已识别登录会话，可以开始统计。' : '未识别到登录会话。请先在同一浏览器登录 B 站；已登录仍失败时，请检查是否使用相同浏览器配置、更新 Tampermonkey 后重新检测。';
+  } catch (error) { $('session-status').textContent = error.message; }
+  finally { $('check-session').disabled = Boolean(controller); }
 }
 function remember(data) {
   history = [data, ...history.filter(item => item.mediaId !== data.mediaId)].slice(0,5);
@@ -107,7 +117,7 @@ async function runAnalysis(input) {
   controller = new AbortController(); setBusy(true);
   $('progress-text').textContent = '正在读取番剧信息…'; $('progress-bar').removeAttribute('value'); status('正在连接数据源…');
   try {
-    if ($('connection-mode').value === 'bridge') await bridgeCall('ping',{},controller.signal);
+    if ($('connection-mode').value === 'bridge') assertSessionBridge(await bridgeCall('ping',{},controller.signal));
     const request = makeTransport($('connection-mode').value,$('proxy-url').value,controller.signal);
     const result = await analyze(input,request,controller.signal, p => {
       const type = p.type === 'short' ? '短评' : '长评';
@@ -126,6 +136,7 @@ async function runAnalysis(input) {
 $('analysis-form').addEventListener('submit',event => {event.preventDefault(); runAnalysis($('media-input').value).catch(error => {if (error.name !== 'AbortError') status(error.message,true);});});
 $('cancel').addEventListener('click',() => controller?.abort());
 $('detect').addEventListener('click',detect);
+$('check-session').addEventListener('click',checkSession);
 $('connection-mode').addEventListener('change',() => {const proxy = $('connection-mode').value === 'proxy';$('proxy-field').hidden = !proxy;$('bridge-field').hidden = proxy;});
 $('filter-level').addEventListener('input',() => {try {localStorage.setItem('tr-level',$('filter-level').value);} catch {} render();});
 $('import-button').addEventListener('click',() => $('import-file').click());

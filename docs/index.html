@@ -20,13 +20,13 @@
             <label for="filter-level">最低用户等级 <output id="level-label">Lv.5</output></label><input id="filter-level" type="range" min="0" max="6" step="1" value="5"><div class="range-labels"><span>0 · 全部等级</span><span>6 · 最高等级</span></div>
             <label for="connection-mode">数据连接</label><select id="connection-mode"><option value="bridge">本机油猴连接</option><option value="proxy">自定义代理</option></select>
             <div id="proxy-field" hidden><label for="proxy-url">HTTPS 代理前缀</label><input id="proxy-url" type="url" placeholder="https://your-server.example/proxy/"><p class="hint">代理会收到公开番剧查询，不发送 Cookie。请仅使用你信任的服务。</p></div>
-            <div id="bridge-field" class="connection"><span id="bridge-status">正在检测连接助手…</span><a href="./true-ranking-bridge.user.js" id="install-link">安装连接助手 ↗</a><button id="detect" class="text-button" type="button">重新检测</button></div>
+            <div id="bridge-field" class="connection"><span id="bridge-status">正在检测连接助手…</span><a href="./true-ranking-bridge.user.js" id="install-link">安装 / 更新连接助手 ↗</a><button id="detect" class="text-button" type="button">重新检测</button><a href="https://www.bilibili.com/" target="_blank" rel="noreferrer">打开 B 站登录 ↗</a><button id="check-session" class="text-button" type="button">检测登录状态</button><span id="session-status" role="status" aria-live="polite">使用同一浏览器的 B 站会话；Cookie 仅由扩展发给 B 站，不传给本网页。</span></div>
             <button class="primary" id="start" type="submit">开始统计 <span aria-hidden="true">→</span></button><button id="cancel" class="secondary" type="button" hidden>取消统计</button>
           </form>
           <div id="status" role="status" aria-live="polite">输入番剧编号开始；也可导入已保存的数据。</div><div id="progress" hidden><p id="progress-text"></p><progress id="progress-bar" max="100"></progress></div>
         </section>
         <section class="panel"><div class="section-label"><span>02</span><h2>本机记录</h2></div><div class="file-actions"><button id="import-button" class="secondary">导入 JSON</button><button id="export" class="secondary" disabled>导出 JSON</button></div><input type="file" id="import-file" accept=".json,application/json" hidden><div id="history"><p class="hint">完成的统计会保存在当前浏览器。</p></div></section>
-        <details class="panel help"><summary>第一次使用？</summary><ol><li>浏览器安装 Tampermonkey 扩展。</li><li>点击上方「安装连接助手」。</li><li>刷新本页，允许脚本访问 api.bilibili.com 后开始统计。</li></ol><p>连接助手只读取公开番剧接口，不读取登录 Cookie。手机或不支持扩展的浏览器可配置自有代理，或导入数据查看。</p></details>
+        <details class="panel help"><summary>首次使用 / 遇到 412？</summary><ol><li>安装或更新 Tampermonkey 及连接助手（需 1.1.0 或更新版），刷新本页。</li><li>在同一浏览器配置中打开 B 站登录，处理 B 站页面提示的验证。</li><li>回到这里点击「检测登录状态」，确认会话后开始统计。</li></ol><p>412 是风控响应，不一定表示缺少 Cookie。遇到风控会停止采集并暂停请求至少 60 秒，不自动重试。登录后仍失败，请稍后再试并检查 B 站页面是否可正常访问。</p><p>扩展代为携带 B 站会话，网页无法读取 Cookie。代理模式不会携带本机登录会话；不支持扩展的设备也可导入已保存的数据。</p></details>
       </aside>
       <div class="main-column">
         <section class="panel result-header"><div><p class="eyebrow" id="result-tag">ANALYSIS WORKSPACE</p><h2 id="result-title">等待一部番剧</h2><p id="result-meta" class="hint">统计完成后，在这里查看评分、样本与趋势。</p></div><a id="bili-link" class="secondary" target="_blank" rel="noreferrer" hidden>在 B 站查看 ↗</a></section>

@@ -1,4 +1,8 @@
 import {parseInput, normalizeReview} from './core.js';
+export function assertSessionBridge(info) {
+  if (!info?.authenticatedRequests || !info?.sessionCheck) throw new Error('连接助手版本过旧，无法使用 B 站登录会话。请点击「安装 / 更新连接助手」升级至 1.1.0 或更新版本，然后刷新本页。');
+  return info;
+}
 export const sleep = (ms, signal) => new Promise((resolve, reject) => {
   signal?.throwIfAborted();
   const abort = () => { clearTimeout(timer); reject(signal.reason); };
@@ -13,7 +17,9 @@ export function bridgeCall(action, payload = {}, signal) {
     const abort = () => { window.postMessage({channel:'tr-request', action:'abort', id}, location.origin); cleanup(); reject(signal.reason); };
     const receive = event => {
       if (event.source !== window || event.origin !== location.origin || event.data?.channel !== 'tr-response' || event.data.id !== id) return;
-      cleanup(); event.data.error ? reject(new Error(event.data.error)) : resolve(event.data.data);
+      cleanup();
+      if (event.data.error) {const error = new Error(event.data.error); error.code = event.data.errorCode; reject(error);}
+      else resolve(event.data.data);
     };
     const timer = setTimeout(() => { cleanup(); reject(new Error(action === 'ping' ? '尚未连接油猴脚本' : '请求超时，请稍后重试。')); }, action === 'ping' ? 1200 : 35000);
     window.addEventListener('message', receive);
@@ -35,14 +41,17 @@ export function makeTransport(mode, proxy, signal) {
     else {
       const timer = AbortSignal.timeout(30000);
       const response = await fetch(prefix.href.replace(/\/?$/, '/') + url, {signal: AbortSignal.any([signal, timer].filter(Boolean)), credentials:'omit', referrerPolicy:'no-referrer'});
-      if (!response.ok) throw new Error(`接口返回 HTTP ${response.status}，可能触发风控，请稍后再试。`);
+      if ([412,429].includes(response.status)) throw new Error(`代理收到 B 站 HTTP ${response.status} 风控响应。代理无法使用本机 B 站登录会话，请切换「本机油猴连接」并更新助手；本页不会把 Cookie 发送给代理。`);
+      if (!response.ok) throw new Error(`接口返回 HTTP ${response.status}，请稍后再试。`);
       try { data = await response.json(); } catch { throw new Error('代理未返回 JSON，请检查地址或 B 站风控状态。'); }
     }
+    if (!data || typeof data.code !== 'number') throw new Error('B 站接口返回了未知的数据结构。');
+    if (mode === 'proxy' && [-412,-509].includes(data.code)) throw new Error(`代理触发 B 站风控 ${data.code}。代理不能使用本机登录会话，请切换「本机油猴连接」并更新连接助手后重试。`);
     if (data.code !== 0) throw new Error(`B 站接口错误 ${data.code}：${data.message || '请稍后再试'}`);
     return data;
   };
 }
-export async function collectReviews(type, mediaId, request, signal, progress, delay = 350) {
+export async function collectReviews(type, mediaId, request, signal, progress, delay = 1200) {
   const rows = [], seen = new Set(), cursors = new Set();
   let cursor = '', total = null, skipped = 0;
   for (let page = 0; page < 20000; page++) {
