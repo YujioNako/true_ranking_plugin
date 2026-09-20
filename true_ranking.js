@@ -1,17 +1,31 @@
 import plugin from '../../lib/plugins/plugin.js'
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { randomUUID } from 'node:crypto'
+import { randomUUID, createHash } from 'node:crypto'
 
 // 单文件安装：复制到 Yunzai 的 plugins/example/true_ranking.js 后重启。
 // 模板自动生成，图片由宿主 lib/puppeteer/puppeteer.js 负责渲染和消息封装。
 // 每次查询读取 data/cha_chengfen/bilibili_cookies.txt；BILIBILI_COOKIE 可覆盖。
 // BILIBILI_COOKIE_FILE 可指定其他文件；不要通过群聊提交 Cookie。
-const CONFIG = Object.freeze({ filterLevel: 5, requestInterval: 1200, timeout: 30000, maxPages: 3000 })
+const CONFIG = Object.freeze({ filterLevel: 5, requestInterval: 3000, timeout: 30000, maxPages: 10000, checkpointPages: 10 })
 const SCORES = [2, 4, 6, 8, 10]
-const activeUsers = new Set()
+// Keep cancellation handles and the shared request clock across hot reloads.
+const runtimeKey = Symbol.for('true-ranking.recovery.v1')
+const runtime = globalThis[runtimeKey] ||= { jobs: new Map(), nextRequestAt: 0, cooldownUntil: 0 }
 const templateWrites = new Map()
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms))
+const cancelled = () => Object.assign(new Error('已取消采集，进度已保留。'), { name: 'AbortError' })
+function delay(ms, signal) {
+  return new Promise((resolve, reject) => {
+    if (signal?.aborted) return reject(cancelled())
+    const finish = () => { signal?.removeEventListener('abort', abort); resolve() }
+    const timer = setTimeout(finish, ms)
+    const abort = () => { clearTimeout(timer); signal.removeEventListener('abort', abort); reject(cancelled()) }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
+class RequestError extends Error {
+  constructor(message, kind = 'fatal', retryAfter = 0) { super(message); this.kind = kind; this.retryAfter = retryAfter }
+}
 const count = value => Number.isFinite(value) ? value.toLocaleString('zh-CN') : '—'
 const score = value => Number.isFinite(value) ? value.toFixed(1) : '暂无'
 const escapeHtml = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]))
@@ -74,40 +88,83 @@ async function loadCookie(options = {}) {
 
 async function createClient(options = {}) {
   const fetcher = options.fetchImpl || globalThis.fetch || (await import('node-fetch')).default
-  const cookie = await loadCookie(options)
+  let cookie = await loadCookie(options)
   const interval = options.interval ?? CONFIG.requestInterval
-  let nextRequestAt = 0
-  async function get(url, useCookie, handler) {
-    await delay(Math.max(0, nextRequestAt - Date.now()))
-    nextRequestAt = Date.now() + interval
+  const clock = options.now || Date.now, sleep = options.sleep || delay
+  const shared = options.runtime || (options.recovery ? runtime : { nextRequestAt:0, cooldownUntil:0 }), signal = options.signal
+  let riskRetries = 0, transientRetries = 0
+  const check = () => { if (signal?.aborted) throw cancelled() }
+  async function pace() {
+    // Recheck after waking: another task may have encountered a risk response.
+    for (;;) {
+      check()
+      const wait = Math.max(shared.nextRequestAt, shared.cooldownUntil) - clock()
+      if (wait > 0) { await sleep(wait, signal); continue }
+      shared.nextRequestAt = clock() + interval
+      return
+    }
+  }
+  async function getOnce(url, useCookie, handler) {
+    await pace()
     const controller = new AbortController()
-    const timer = setTimeout(() => controller.abort(), options.timeout ?? CONFIG.timeout)
+    const abort = () => controller.abort()
+    signal?.addEventListener('abort', abort, { once: true })
+    const timer = setTimeout(abort, options.timeout ?? CONFIG.timeout)
     try {
+      check()
       const headers = { 'User-Agent': 'Mozilla/5.0', Referer: 'https://www.bilibili.com/' }
       if (useCookie && cookie) headers.Cookie = cookie
       const response = await fetcher(url, { method: 'GET', headers, redirect: 'manual', signal: controller.signal })
-      if ([412,429].includes(response.status)) throw new Error(`B 站触发风控（HTTP ${response.status}），本次统计停止；请稍后再试。管理员可检查机器人网络和 B 站 Cookie 配置，登录不保证解除风控。`)
-      if ([401,403].includes(response.status)) throw new Error(`B 站拒绝访问（HTTP ${response.status}），请管理员检查登录会话及访问权限。`)
+      check()
+      const hint = response.headers?.get('retry-after')
+      const retryAfter = hint ? Math.max(0, /^\d+$/.test(hint) ? Number(hint)*1000 : Date.parse(hint)-clock()) || 0 : 0
+      if ([412,429].includes(response.status)) throw new RequestError(`B 站触发风控（HTTP ${response.status}）。`, 'risk', retryAfter)
+      if ([401,403].includes(response.status)) throw new RequestError(`B 站拒绝访问（HTTP ${response.status}），请管理员检查登录会话及访问权限。`)
+      if (response.status === 408 || response.status >= 500) throw new RequestError(`B 站接口暂时不可用（HTTP ${response.status}）。`, 'transient', retryAfter)
       return await handler(response)
     } catch (error) {
-      if (controller.signal.aborted) throw new Error('B 站接口请求超时，请稍后再试。')
-      // Never print request options, headers, Cookie or raw upstream bodies.
-      if (error instanceof TypeError || error?.name === 'FetchError') throw new Error('连接 B 站失败，请检查机器人网络后重试。')
+      check()
+      if (controller.signal.aborted) throw new RequestError('B 站接口请求超时。', 'transient')
+      // Never expose request options, Cookie, raw upstream bodies or fetch errors.
+      if (error instanceof TypeError || error?.name === 'FetchError') throw new RequestError('连接 B 站失败。', 'transient')
       throw error
-    } finally { clearTimeout(timer) }
+    } finally { clearTimeout(timer); signal?.removeEventListener('abort', abort) }
+  }
+  async function get(url, useCookie, handler) {
+    let attempt = 0
+    for (;;) {
+      try { return await getOnce(url, useCookie, handler) } catch (error) {
+        if (!['risk','transient'].includes(error.kind)) throw error
+        const risk = error.kind === 'risk'
+        const waits = risk ? [120000,300000] : [5000,15000,45000]
+        const index = risk ? riskRetries : attempt
+        const exhausted = !options.recovery || index >= waits.length || (!risk && transientRetries >= 10)
+        const wait = Math.max(error.retryAfter || 0, waits[Math.min(index,waits.length-1)])
+        // Shared pacing also protects other users querying through this plugin.
+        shared.cooldownUntil = Math.max(shared.cooldownUntil, clock()+wait)
+        error.resumeAfter = shared.cooldownUntil
+        if (exhausted || wait > 900000) throw error
+        if (risk) riskRetries++; else { attempt++; transientRetries++ }
+        await options.onRetry?.({ error, wait, resumeAfter: error.resumeAfter })
+        await sleep(wait, signal)
+        check()
+        // The shared file may have been refreshed while waiting.
+        cookie = await loadCookie(options)
+      }
+    }
   }
   return {
     async request(apiPath) {
       const url = new URL(apiPath, 'https://api.bilibili.com')
       if (url.origin !== 'https://api.bilibili.com' || !['/pgc/review/user','/pgc/review/short/list','/pgc/review/long/list','/pgc/view/web/season'].includes(url.pathname)) throw new Error('拒绝非番剧接口请求。')
       return get(url.href, true, async response => {
-        if (!response.ok) throw new Error(`B 站接口返回 HTTP ${response.status}，统计未完成。`)
+        if (!response.ok) throw new RequestError(`B 站接口返回 HTTP ${response.status}，统计未完成。`)
         let result
-        try { result = await response.json() } catch { throw new Error('B 站未返回有效 JSON，可能需要处理站内验证。') }
-        if (!result || typeof result.code !== 'number') throw new Error('B 站接口数据结构异常。')
-        if ([-412,-509].includes(result.code)) throw new Error(`B 站触发风控（${result.code}），本次统计停止，请稍后再试。`)
-        if (result.code === -101) throw new Error('B 站登录会话失效，请管理员更新共享 Cookie 文件或 BILIBILI_COOKIE。')
-        if (result.code !== 0) throw new Error(`B 站接口返回错误码 ${result.code}，统计未完成。`)
+        try { result = await response.json() } catch { throw new RequestError('B 站未返回有效 JSON，可能需要处理站内验证。') }
+        if (!result || typeof result.code !== 'number') throw new RequestError('B 站接口数据结构异常。')
+        if ([-352,-412,-509].includes(result.code)) throw new RequestError(`B 站触发风控（${result.code}）。`, 'risk')
+        if (result.code === -101) throw new RequestError('B 站登录会话失效，请管理员更新共享 Cookie 文件或 BILIBILI_COOKIE。')
+        if (result.code !== 0) throw new RequestError(`B 站接口返回错误码 ${result.code}，统计未完成。`)
         return result
       })
     },
@@ -118,7 +175,6 @@ async function createClient(options = {}) {
         target = await get(current, false, async response => {
           const location = response.headers.get('location')
           if (![301,302,303,307,308].includes(response.status) || !location) throw new Error('无法展开分享链接，请直接发送 MD / EP / SS 编号。')
-          // Validate each redirect BEFORE following it; never forward Cookie to b23.tv.
           return parseTarget(new URL(location, current).href)
         })
       }
@@ -128,48 +184,121 @@ async function createClient(options = {}) {
   }
 }
 
-async function collectReviews(type, mediaId, client, maxPages = CONFIG.maxPages) {
-  const rows = [], seen = new Set(), cursors = new Set()
-  let cursor = '', total = null, skipped = 0
-  for (let page = 0; page < maxPages; page++) {
-    const query = new URLSearchParams({ media_id: mediaId, ps: '20' })
-    if (cursor) query.set('cursor', cursor)
-    const { data } = await client.request(`/pgc/review/${type}/list?${query}`)
-    if (!data || !Array.isArray(data.list)) throw new Error('评论接口结构异常，统计未完成。')
-    if (numeric(data.total) != null) total = data.total
-    for (const item of data.list) {
-      const value = Number(item.score), level = Number(item.author?.level), time = Number(item.ctime)
-      if (!SCORES.includes(value)) { skipped++; continue }
-      // Preserve original unfiltered averages even when level/time is absent.
-      const row = [value, Number.isInteger(level) && level >= 0 && level <= 6 && item.author?.level != null ? level : null, Number.isFinite(time) && time > 0 ? time : null]
-      const key = String(item.review_id ?? `${item.author?.mid}:${row.join(':')}`)
-      if (!seen.has(key)) { seen.add(key); rows.push(row) }
-    }
-    const next = data.next == null ? '' : String(data.next)
-    if (!next || next === '0') return { rows, total, skipped }
-    if (!data.list.length || cursors.has(next)) throw new Error('评论分页停止推进，未将部分数据当作完整结果。请稍后再试。')
-    cursors.add(next); cursor = next
+const emptyCollection = () => ({ rows: [], seen: [], cursors: [], cursor: '', total: null, skipped: 0, pages: 0, done: false })
+function newCheckpoint(input, filterLevel) {
+  return { version: 1, input, target: JSON.stringify(parseTarget(input)), filterLevel, status: 'running', phase: '解析番剧', updatedAt: Date.now(), resumeAfter: 0, short: emptyCollection(), long: emptyCollection() }
+}
+function validateCheckpoint(value) {
+  const validInt = n => Number.isSafeInteger(n) && n >= 0
+  if (!value || value.version !== 1 || typeof value.input !== 'string' || value.input.length > 4096 || value.target !== JSON.stringify(parseTarget(value.input)) || !Number.isInteger(value.filterLevel) || value.filterLevel < 0 || value.filterLevel > 6 || !['running','waiting','paused','cancelled','complete'].includes(value.status) || !validInt(value.updatedAt) || !validInt(value.resumeAfter) || !['解析番剧','短评','长评','完成'].includes(value.phase)) throw new Error('Invalid checkpoint')
+  if (value.media && (!/^\d{1,30}$/.test(value.media.mediaId) || typeof value.media.title !== 'string' || value.media.title.length > 4096)) throw new Error('Invalid media')
+  for (const type of ['short','long']) {
+    const part = value[type]
+    if (!part || !Array.isArray(part.rows) || part.rows.length > 200000 || !part.rows.every(row => Array.isArray(row) && row.length === 3 && SCORES.includes(row[0]) && (row[1] === null || Number.isInteger(row[1]) && row[1] >= 0 && row[1] <= 6) && (row[2] === null || Number.isFinite(row[2]) && row[2] > 0)) || !Array.isArray(part.seen) || part.seen.length > 200000 || !part.seen.every(s => typeof s === 'string' && s.length <= 256) || part.seen.length < part.rows.length || !Array.isArray(part.cursors) || part.cursors.length > CONFIG.maxPages || !part.cursors.every(s => typeof s === 'string' && s.length <= 256) || typeof part.cursor !== 'string' || part.cursor.length > 256 || !validInt(part.pages) || part.pages > CONFIG.maxPages || !validInt(part.skipped) || typeof part.done !== 'boolean' || !(part.total === null || validInt(part.total))) throw new Error('Invalid collection')
   }
-  throw new Error('评论页数超过安全上限，统计未完成。')
+  if ((value.short.pages || value.long.pages) && !value.media || value.status === 'complete' && (!value.media || !value.short.done || !value.long.done)) throw new Error('Incomplete checkpoint')
+  return value
+}
+function checkpointStore(key, root = process.cwd()) {
+  const directory = path.join(root,'data','true-ranking','jobs')
+  const file = path.join(directory,createHash('sha256').update(key).digest('hex')+'.json')
+  return {
+    async load() {
+      let handle
+      try {
+        handle = await fs.open(file,'r')
+        const size = (await handle.stat()).size
+        if (size > 64*1024*1024) throw new Error('Too large')
+        return validateCheckpoint(JSON.parse(await handle.readFile('utf8')))
+      } catch (error) {
+        if (error.code === 'ENOENT') return null
+        throw new Error('进度文件损坏或无法读取；可发送「#番剧评分重来 番剧编号」重新采集。')
+      } finally { await handle?.close() }
+    },
+    async save(job) {
+      job.updatedAt = Date.now()
+      await fs.mkdir(directory,{recursive:true,mode:0o700})
+      const temporary = file+'.'+randomUUID()+'.tmp'
+      try {
+        await fs.writeFile(temporary,JSON.stringify(job),{mode:0o600})
+        await fs.rename(temporary,file)
+      } catch { throw new Error('无法保存采集进度，请管理员检查磁盘空间和目录权限。') }
+      finally { await fs.unlink(temporary).catch(()=>{}) }
+    }
+  }
 }
 
-async function analyze(input, client, progress = async () => {}) {
-  let target = parseTarget(input)
-  if (target.type === 'short') target = await client.expand(target.url)
-  let mediaId = target.id
-  if (target.type !== 'md') {
-    const response = await client.request(`/pgc/view/web/season?${target.type === 'ep' ? 'ep_id' : 'season_id'}=${target.id}`)
-    mediaId = String(response.result?.media_id ?? '')
-    if (!/^\d+$/.test(mediaId)) throw new Error('无法转换为 MD 编号，请直接发送 MD 编号。')
+async function collectReviews(type, mediaId, client, maxPages = CONFIG.maxPages, options = {}) {
+  const state = options.state || emptyCollection()
+  const seen = new Set(state.seen), cursors = new Set(state.cursors)
+  let stalls = 0
+  const save = options.save || (async()=>{})
+  while (!state.done && state.pages < maxPages) {
+    if (options.signal?.aborted) throw cancelled()
+    const query = new URLSearchParams({ media_id: mediaId, ps: '20' })
+    if (state.cursor) query.set('cursor', state.cursor)
+    const { data } = await client.request(`/pgc/review/${type}/list?${query}`)
+    if (!data || !Array.isArray(data.list) || data.list.length > 20) throw new Error('评论接口结构异常，统计未完成。')
+    const next = data.next == null ? '' : String(data.next)
+    if (next.length > 256) throw new Error('评论游标异常，统计未完成。')
+    const terminal = !next || next === '0'
+    // A stalled page is retried at the SAME cursor. Never infer completion
+    // from counts: the advertised total can change while a crawl is running.
+    if (!terminal && (!data.list.length || cursors.has(next) || next === state.cursor)) {
+      if (stalls++ === 0 && options.onStall) { await save(); await options.onStall(); continue }
+      throw new Error('评论分页停止推进，进度已保留，未将部分数据当作完整结果。请稍后继续。')
+    }
+    stalls = 0
+    if (Number.isSafeInteger(data.total) && data.total >= 0) state.total = data.total
+    for (const item of data.list) {
+      const value = Number(item.score), level = Number(item.author?.level), time = Number(item.ctime)
+      const row = [value, Number.isInteger(level) && level >= 0 && level <= 6 && item.author?.level != null ? level : null, Number.isFinite(time) && time > 0 ? time : null]
+      // Hash the fallback too; don't store author IDs or comment bodies.
+      const key = createHash('sha256').update(String(item.review_id ?? `${item.author?.mid}:${row.join(':')}`)).digest('hex')
+      if (seen.has(key)) continue
+      seen.add(key); state.seen.push(key)
+      if (SCORES.includes(value)) state.rows.push(row); else state.skipped++
+    }
+    state.pages++; state.done = terminal
+    if (!terminal) { cursors.add(next); state.cursors.push(next); state.cursor = next }
+    if (state.pages % CONFIG.checkpointPages === 0 || terminal) await save()
+    await options.onPage?.(state)
   }
-  const { result } = await client.request(`/pgc/review/user?media_id=${mediaId}`)
-  if (!result?.media?.title) throw new Error('番剧不存在或暂时不可访问。')
-  const media = result.media
-  await progress('短评')
-  const short = await collectReviews('short', mediaId, client)
-  await progress('长评')
-  const long = await collectReviews('long', mediaId, client)
-  return { mediaId, title: media.title, officialScore: numeric(media.rating?.score), officialCount: numeric(media.rating?.count), short: short.rows, long: long.rows, totals: {short:short.total,long:long.total}, skipped:short.skipped+long.skipped, timestamp: new Date().toISOString() }
+  if (!state.done) throw new Error('评论页数超过安全上限，进度已保留；请管理员检查接口及 CONFIG.maxPages。')
+  return { rows: state.rows, total: state.total, skipped: state.skipped }
+}
+
+async function analyze(input, client, progress = async () => {}, options = {}) {
+  const job = options.job || newCheckpoint(input,CONFIG.filterLevel)
+  const save = options.save || (async()=>{})
+  if (!job.media) {
+    let target = parseTarget(input)
+    if (target.type === 'short') target = await client.expand(target.url)
+    let mediaId = target.id
+    if (target.type !== 'md') {
+      const response = await client.request(`/pgc/view/web/season?${target.type === 'ep' ? 'ep_id' : 'season_id'}=${target.id}`)
+      mediaId = String(response.result?.media_id ?? '')
+      if (!/^\d{1,30}$/.test(mediaId)) throw new Error('无法转换为 MD 编号，请直接发送 MD 编号。')
+    }
+    const { result } = await client.request(`/pgc/review/user?media_id=${mediaId}`)
+    if (typeof result?.media?.title !== 'string' || !result.media.title) throw new Error('番剧不存在或暂时不可访问。')
+    const media = result.media
+    job.media = { mediaId, title: media.title, officialScore: numeric(media.rating?.score), officialCount: numeric(media.rating?.count) }
+    await save()
+  }
+  for (const [type,label] of [['short','短评'],['long','长评']]) {
+    if (job[type].done) continue
+    job.phase = label
+    await save(); await progress(label)
+    await collectReviews(type,job.media.mediaId,client,CONFIG.maxPages,{ ...options, state:job[type], save })
+  }
+  return { ...job.media, short:job.short.rows, long:job.long.rows, totals:{short:job.short.total,long:job.long.total}, skipped:job.short.skipped+job.long.skipped, timestamp:new Date().toISOString() }
+}
+
+function progressText(job) {
+  const labels = { running:'采集中',waiting:'冷却等待',paused:'已暂停',cancelled:'已取消（保留进度）',complete:'已完成' }
+  const remaining = Math.max(0, Math.ceil((job.resumeAfter-Date.now())/1000))
+  return `${job.media?.title || job.input}：${labels[job.status] || '已暂停'} · ${job.phase}\n短评 ${job.short.pages} 页 / ${count(job.short.rows.length)} 条有效样本；长评 ${job.long.pages} 页 / ${count(job.long.rows.length)} 条有效样本。${remaining ? `\n冷却还需约 ${remaining} 秒。` : ''}\n发送 #番剧评分继续 续采；#番剧评分取消 停止当前采集并保留进度。`
 }
 
 function summarize(rows) {
@@ -276,29 +405,97 @@ export class example extends plugin {
   }
   async b_socre(e) {
     const key = `${e.self_id || ''}:${e.user_id || e.sender?.user_id || 'unknown'}`
-    if (activeUsers.has(key)) { await e.reply('你的番剧评分任务正在进行，请稍后再试。'); return true }
-    let command
-    try { command = parseCommand(e.msg); parseTarget(command.input) } catch (error) { await e.reply(error.message); return true }
-    activeUsers.add(key)
+    const store = checkpointStore(key)
+    const action = String(e.msg).replace(/^#?番剧评分\s*/, '').trim()
+    if (action === '进度' || action === '取消') {
+      try {
+        const active = runtime.jobs.get(key)
+        if (action === '取消' && active) {
+          active.controller.abort()
+          await e.reply('正在取消请求并保存进度；稍后可发送 #番剧评分继续。')
+        } else {
+          const job = active?.job || await store.load()
+          if (job && !active && ['running','waiting'].includes(job.status)) job.status = 'paused'
+          await e.reply(job ? progressText(job) : '你还没有番剧评分任务。')
+        }
+      } catch (error) { await e.reply(error.message) }
+      return true
+    }
+    if (runtime.jobs.has(key)) { await e.reply('你的番剧评分任务正在进行；发送 #番剧评分进度 查看，或 #番剧评分取消 保存进度并停止。'); return true }
+    const active = { controller:new AbortController(), job:null }
+    // Reserve before disk I/O so simultaneous messages cannot start two jobs.
+    runtime.jobs.set(key,active)
+    let job, save = async()=>{}, lastLog = 0
+    const notify = text => e.reply(text).catch(()=>{})
     try {
-      await e.reply(`开始统计，保留 Lv.${command.filterLevel} 及以上样本；完成后发送评分面板图片。评论较多时需要一些时间。`)
-      const client = await createClient()
-      const data = await analyze(command.input,client,type => e.reply(`正在采集${type}…`))
+      const restart = /^重来(?:\s|$)/.test(action)
+      const previous = restart ? null : await store.load()
+      let command
+      if (action === '继续') {
+        if (!previous) throw new Error('没有可继续的任务，请先发送番剧编号。')
+        command = {input:previous.input,filterLevel:previous.filterLevel}
+      } else command = parseCommand('#番剧评分 '+(restart ? action.replace(/^重来\s*/, '') : action))
+      const target = JSON.stringify(parseTarget(command.input))
+      if (previous && previous.status !== 'complete' && previous.target !== target) throw new Error('你有另一部番剧的未完成进度。发送 #番剧评分继续 续采；或 #番剧评分重来 番剧编号 替换旧进度。')
+      const resumed = previous && previous.target === target && (previous.status !== 'complete' || action === '继续')
+      job = resumed ? previous : newCheckpoint(command.input,command.filterLevel)
+      active.job = job; job.filterLevel = command.filterLevel
+      save = () => store.save(job)
+      job.status = 'running'
+      await save()
+      await e.reply(`${resumed ? '从保存的进度继续统计' : '开始统计'}，保留 Lv.${job.filterLevel} 及以上样本；完成后发送评分面板图片。请求统一间隔至少 3 秒，大量评论可能耗时数小时。\n可发送 #番剧评分进度 或 #番剧评分取消。`)
+      const wait = async (milliseconds, reason, resumeAfter = Date.now()+milliseconds) => {
+        job.status = 'waiting'; job.resumeAfter = resumeAfter
+        await save()
+        await notify(`${reason}\n已保存进度，约 ${Math.ceil(milliseconds/1000)} 秒后从当前页重试；可发送 #番剧评分取消。`)
+      }
+      const pending = Math.max(job.resumeAfter,runtime.cooldownUntil)-Date.now()
+      if (pending > 0) {
+        await wait(pending,'仍处于请求冷却期。')
+        await delay(pending,active.controller.signal)
+      }
+      job.status = 'running'; job.resumeAfter = 0
+      const client = await createClient({recovery:true,signal:active.controller.signal,onRetry:async({error,wait:ms,resumeAfter})=>{
+        await wait(ms,error.message,resumeAfter)
+      }})
+      const data = await analyze(job.input,client,label=>notify(`正在采集${label}…\n${progressText(job)}`),{
+        job,save,signal:active.controller.signal,
+        onStall:async()=>{
+          await wait(15000,'评论分页暂时停止推进。')
+          await delay(15000,active.controller.signal)
+        },
+        onPage:async()=>{
+          job.status = 'running'; job.resumeAfter = 0
+          if (Date.now()-lastLog >= 60000) {
+            lastLog = Date.now()
+            globalThis.logger?.mark?.(`[true-ranking] md${job.media.mediaId} ${job.phase} shortPages=${job.short.pages} longPages=${job.long.pages} samples=${job.short.rows.length+job.long.rows.length}`)
+          }
+        }
+      })
+      if (active.controller.signal.aborted) throw cancelled()
+      job.status = 'complete'; job.phase = '完成'; job.resumeAfter = 0
+      await save()
       let image
-      try { image = await renderPanel(data,command.filterLevel) } catch { image = false }
+      try { image = await renderPanel(data,job.filterLevel) } catch { image = false }
+      if (active.controller.signal.aborted) throw cancelled()
       if (image) {
-        // Host screenshot() already returns segment.image; no oicq/icqq coupling.
-        try { await e.reply(image) } catch { await e.reply(`图片发送失败，改发文字结果。\n${buildTextResult(data,command.filterLevel)}`) }
+        try { await e.reply(image) } catch { await e.reply(`图片发送失败，改发文字结果。\n${buildTextResult(data,job.filterLevel)}`) }
       } else {
-        await e.reply(`图片渲染失败，已回退文字结果。请管理员检查 Yunzai 的 Puppeteer / Chromium 和中文字体。\n${buildTextResult(data,command.filterLevel)}`)
+        await e.reply(`图片渲染失败，已回退文字结果。请管理员检查 Yunzai 的 Puppeteer / Chromium 和中文字体。\n${buildTextResult(data,job.filterLevel)}`)
       }
     } catch (error) {
-      await e.reply(`统计未完成：${error.message}`)
-    } finally { activeUsers.delete(key) }
+      let saved = false, saveError
+      if (job) {
+        job.status = active.controller.signal.aborted ? 'cancelled' : 'paused'
+        job.resumeAfter = Math.max(job.resumeAfter,error.resumeAfter || 0)
+        try { await save(); saved = true } catch (failure) { saveError = failure.message }
+      }
+      await e.reply(`统计未完成：${error.message}${saved ? '\n进度已保存。发送 #番剧评分继续 或重发相同番剧编号，从断点继续。风控持续时，请先在 B 站处理验证并更新共享 Cookie。' : ''}${saveError ? '\n'+saveError+' 最近一次成功落盘后的进度可能丢失。' : ''}`)
+    } finally { runtime.jobs.delete(key) }
     return true
   }
   async b_socre_help(e) {
-    await e.reply('番剧评分 · 图片面板版\n#番剧评分 md4315402\n#番剧评分 ep705756\n#番剧评分 ss26257\n#番剧评分 番剧分享链接\n#番剧评分 md4315402 等级5\n等级可选 0–6，默认 5；0 表示不按等级过滤。\n输出含官方/计算评分、长短评明细、分布与两年趋势。\n图片失败自动回退文字；412 等风控会停止本次统计。Cookie 如有需要仅由管理员在服务器配置，不要发到聊天中。')
+    await e.reply('番剧评分 · 图片面板版\n#番剧评分 md4315402\n#番剧评分 ep705756\n#番剧评分 ss26257\n#番剧评分 番剧分享链接\n#番剧评分 md4315402 等级5\n#番剧评分进度\n#番剧评分取消（保留进度）\n#番剧评分继续\n#番剧评分重来 ep1521592（替换旧进度）\n等级可选 0–6，默认 5；0 表示不按等级过滤。\n输出含官方/计算评分、长短评明细、分布与两年趋势。\n网络错误有限退避重试；-352/412 等风控冷却后重试，仍失败会保存进度并暂停。重启后可继续。Cookie 仅由管理员在服务器配置，不要发到聊天中。')
     return true
   }
 }
