@@ -1,0 +1,1 @@
+{"name":"true-ranking-web","private":true,"type":"module","scripts":{"test":"node --test tests/*.test.js","check":"node --check docs/app.js && node --check docs/core.js && node --check docs/api.js && node --check docs/true-ranking-bridge.user.js","dev":"node scripts/serve.js"},"engines":{"node":">=20"}}

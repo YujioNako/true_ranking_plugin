@@ -1,0 +1,23 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {parseInput,filterRows,summarize,trend,probability,validateDataset,normalizeReview} from '../docs/core.js';
+import {collectReviews,analyze,sleep,makeTransport} from '../docs/api.js';
+const rows = [[2,0,100],[6,4,200],[10,5,300],[10,6,400]];
+test('MD/EP/SS inputs and links',() => {
+  for (const [input,type,id] of [['4315402','md','4315402'],['MD4315402','md','4315402'],['ep705756','ep','705756'],['ss26257','ss','26257'],['https://www.bilibili.com/bangumi/play/ep705756?from=search','ep','705756']]) assert.deepEqual(parseInput(input),{type,id});
+  for (const input of ['', 'https://evil.example/md123','md1oops','https://b23.tv/abc']) assert.throws(() => parseInput(input));
+});
+test('level zero includes everyone, level five filters',() => {assert.equal(filterRows(rows,0).length,4);assert.equal(filterRows(rows,5).length,2);assert.throws(() => filterRows(rows,7));});
+test('means and distributions use separate filtered counts',() => {assert.equal(summarize(rows).average,7);assert.deepEqual(summarize(filterRows(rows,5)).counts,[0,0,0,0,2]);assert.equal(summarize([]).average,null);});
+test('model estimate handles empty and single samples',() => {assert.equal(probability([],100),null);assert.equal(probability([rows[0]],100),null);assert.equal(probability(rows,null),null);assert.equal(probability(rows,4),1);assert.ok(probability(rows,100)>0 && probability(rows,100)<1);});
+test('trend handles single date and excludes samples after two years',() => {assert.deepEqual(trend([[10,5,100],[2,5,100]]),[{time:100,average:6}]);const result=trend([[2,5,100],[10,5,100+3*365*86400]]);assert.equal(result.at(-1).average,2);assert.equal(result.length,8);assert.deepEqual(trend([]),[]);});
+test('invalid rows rejected, unknown levels never default to high level',() => {assert.equal(normalizeReview({score:10,ctime:100}),null);assert.equal(normalizeReview({score:7,ctime:100,author:{level:5}}),null);});
+const dataset = {version:1,mediaId:'123',title:'测试',timestamp:new Date().toISOString(),short:rows,long:[],totals:{short:4,long:0},officialScore:7,officialCount:4,complete:true};
+test('JSON validation protects rendering and drops extraneous fields',() => {assert.equal(validateDataset({...dataset,anything:'ignored'}).anything,undefined);assert.throws(() => validateDataset({...dataset,short:[[99,5,0]]}));assert.throws(() => validateDataset({...dataset,mediaId:'../evil'}));assert.throws(() => validateDataset({...dataset,timestamp:'invalid'}));});
+const review = (id, score=10) => ({review_id:id,score,author:{level:5,mid:42},ctime:100});
+test('pagination, duplicate reviews and string zero cursor',async () => {let calls=0;const result=await collectReviews('short','123',async () => (++calls===1?{data:{total:3,list:[review(1),review(2)],next:'123'}}:{data:{total:3,list:[review(2),review(3,2)],next:'0'}}),new AbortController().signal,()=>{},0);assert.equal(calls,2);assert.equal(result.rows.length,3);assert.equal(summarize(result.rows).average,22/3);});
+test('repeated cursor is a visible failure, not false completion',async () => {await assert.rejects(collectReviews('short','123',async()=>({data:{list:[review(1)],next:'123'}}),new AbortController().signal,()=>{},0),/停止推进/);});
+test('malformed response and API failure do not produce complete results',async () => {await assert.rejects(collectReviews('long','123',async()=>({data:{}}),undefined,()=>{},0),/未知/);await assert.rejects(analyze('md123',async()=>{throw new Error('风控');}),/风控/);});
+test('cancellation interrupts waiting and prevents next page',async () => {const abort=new AbortController();const promise=sleep(10000,abort.signal);abort.abort();await assert.rejects(promise,{name:'AbortError'});await assert.rejects(collectReviews('short','123',async()=>assert.fail(),abort.signal,()=>{}),{name:'AbortError'});});
+test('EP resolution and short/long aggregation',async () => {const paths=[];const result=await analyze('ep123',async path=>{paths.push(path);if(path.includes('/season'))return{result:{media_id:456}};if(path.includes('/user'))return{result:{media:{title:'Test',rating:{score:8,count:2}}}};return{data:{list:[review(1,path.includes('/short/')?2:10)],next:0,total:1}};});assert.equal(result.mediaId,'456');assert.equal(result.short.length,1);assert.equal(result.long.length,1);assert.equal(summarize([...result.short,...result.long]).average,6);assert.ok(paths[0].includes('ep_id=123'));});
+test('proxy accepts only HTTPS without embedded credentials',() => {assert.throws(()=>makeTransport('proxy','http://proxy.example/'));assert.throws(()=>makeTransport('proxy','https://user:password@proxy.example/'));assert.doesNotThrow(()=>makeTransport('proxy','https://proxy.example/proxy/'));});

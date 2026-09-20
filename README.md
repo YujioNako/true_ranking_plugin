@@ -3,6 +3,40 @@
 
 现已增加油猴脚本与浏览器脚本，方便在浏览器上使用
 
+## 网页应用
+
+**[打开 True Ranking 番剧评分观察室](https://yujionako.github.io/true_ranking_plugin/)**
+
+纯静态应用位于 `docs/`，支持 GitHub Pages，无构建依赖，不需要配置密钥。原有三个脚本保持不变。
+
+### 实时统计
+
+1. 在浏览器安装 Tampermonkey，并允许用户脚本运行。
+2. [安装网页连接助手](https://yujionako.github.io/true_ranking_plugin/true-ranking-bridge.user.js)，刷新网页。
+3. 输入 `md4315402`、`ep705756`、`ss26257` 或对应完整番剧链接，点击开始统计。
+4. 调整最低用户等级（0–6）即时重新计算，查看长短评明细、分数分布及最早评论起两年的累计趋势。
+
+GitHub Pages 不能直接跨域读取 B 站 API。连接助手通过 Tampermonkey 的跨域请求能力在本机访问限定的公开评分接口，不读取或发送登录 Cookie；B 站风控、网络限制仍可能导致查询失败。安装连接助手不会修改原有油猴脚本。
+
+不支持扩展的设备可使用自己的 HTTPS CORS 代理（选择「自定义代理」），代理接口格式为 `代理前缀 + https://api.bilibili.com/接口路径`，例如 `https://your-server.example/proxy/https://api.bilibili.com/pgc/review/user?media_id=4315402`。代理需返回原始 JSON 和允许网页来源的 CORS 头。仓库原脚本的更新代理不作为网页默认数据服务。
+
+### 数据与统计口径
+
+- 默认过滤低于 Lv.5 的样本，Lv.0 表示不按等级过滤。缺失或非法等级、非法评分的记录不纳入计算。
+- 每类评论按评论 ID 去重；同一用户的长评与短评仍作为两个样本，与原脚本口径一致。
+- API 可见分页读完不代表全体评分已采集。采集评论数和官方评分人数口径不同，比值可能超过 100%。
+- 原脚本的正态模型估计保留在「计算方法与结果说明」，不作为置信保证。等级过滤后的总体人数未知，估计尤其需要谨慎解读。
+- 最近 5 部番剧的数据仅保存在当前浏览器；无账户、遥测或上传。JSON 导入/导出只包含评分、等级、时间，不包含评论正文、昵称或用户 ID。可清除站点数据移除缓存。
+- 导入数据无需连接助手或代理；文件上限 30 MB。短链接 `b23.tv` 请先展开成完整番剧链接。
+
+### 开发与部署
+
+使用 Node.js 20+：`npm run dev` 启动 `http://127.0.0.1:4173`，`npm run check` 检查脚本语法，`npm test` 运行统计与网络边界测试。无需 `npm install`。
+
+`.github/workflows/pages.yml` 在 `main` 更新后检查并发布 `docs/`。首次部署需先在仓库 **Settings → Pages → Source** 选择 **GitHub Actions**，然后运行 **Publish True Ranking**；默认工作流令牌不能替你首次启用 Pages。也可移除该部署工作流后选择从 `main` 的 `/docs` 目录直接发布。
+
+连接助手默认只匹配本仓库的 Pages 地址和本地 4173 端口；部署到其他域名时需同步修改它的 `@match`、`@downloadURL` 与 `@updateURL`。
+
 ## 使用方法
 ### Yunzai版
 将`true_ranking.js`扔进/plugins/example后配置相关参数后重启即可使用
