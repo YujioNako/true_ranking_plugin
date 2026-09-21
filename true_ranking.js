@@ -185,6 +185,11 @@ async function createClient(options = {}) {
 }
 
 const emptyCollection = () => ({ rows: [], seen: [], cursors: [], cursor: '', total: null, skipped: 0, pages: 0, done: false })
+function reviewKey(item) {
+  const value = Number(item.score), level = Number(item.author?.level), time = Number(item.ctime)
+  const row = [value, Number.isInteger(level) && level >= 0 && level <= 6 && item.author?.level != null ? level : null, Number.isFinite(time) && time > 0 ? time : null]
+  return createHash('sha256').update(String(item.review_id ?? `${item.author?.mid}:${row.join(':')}`)).digest('hex')
+}
 function newCheckpoint(input, filterLevel) {
   return { version: 1, input, target: JSON.stringify(parseTarget(input)), filterLevel, status: 'running', phase: '解析番剧', updatedAt: Date.now(), resumeAfter: 0, short: emptyCollection(), long: emptyCollection() }
 }
@@ -231,7 +236,7 @@ function checkpointStore(key, root = process.cwd()) {
 async function collectReviews(type, mediaId, client, maxPages = CONFIG.maxPages, options = {}) {
   const state = options.state || emptyCollection()
   const seen = new Set(state.seen), cursors = new Set(state.cursors)
-  let stalls = 0
+  let stalls = 0, tailCandidate = null
   const save = options.save || (async()=>{})
   while (!state.done && state.pages < maxPages) {
     if (options.signal?.aborted) throw cancelled()
@@ -242,11 +247,31 @@ async function collectReviews(type, mediaId, client, maxPages = CONFIG.maxPages,
     const next = data.next == null ? '' : String(data.next)
     if (next.length > 256) throw new Error('评论游标异常，统计未完成。')
     const terminal = !next || next === '0'
-    // A stalled page is retried at the SAME cursor. Never infer completion
-    // from counts: the advertised total can change while a crawl is running.
+    // Bilibili can repeat its last visible review with next == cursor instead
+    // of next == 0. Confirm the identical short, entirely known tail twice.
+    // Page coverage is only a guard against an early loop, not proof of EOF.
+    const total = Number.isSafeInteger(data.total) && data.total >= 0 ? data.total : state.total
+    const knownTail = !terminal && state.pages > 0 && next === state.cursor && data.list.length < 20 && total != null && state.pages * 20 >= total && data.list.every(item => seen.has(reviewKey(item)))
+    const fingerprint = knownTail ? JSON.stringify([next,total,data.list.map(reviewKey)]) : null
+    if (knownTail) {
+      if (fingerprint === tailCandidate) {
+        state.done = true; state.total = total; state.endReason = 'confirmed-repeated-tail'
+        await save()
+        return { rows:state.rows, total:state.total, skipped:state.skipped }
+      }
+      if (tailCandidate === null) {
+        tailCandidate = fingerprint
+        await save()
+        if (options.onTail) await options.onTail()
+        else await delay(3000,options.signal)
+        continue
+      }
+    }
+    tailCandidate = null
+    // Other stalled pages are retried at the SAME cursor and remain errors.
     if (!terminal && (!data.list.length || cursors.has(next) || next === state.cursor)) {
       if (stalls++ === 0 && options.onStall) { await save(); await options.onStall(); continue }
-      throw new Error('评论分页停止推进，进度已保留，未将部分数据当作完整结果。请稍后继续。')
+      throw new RequestError('评论分页停止推进，尚未确认到达末页；这不是风控响应，未将部分数据当作完整结果。', 'pagination')
     }
     stalls = 0
     if (Number.isSafeInteger(data.total) && data.total >= 0) state.total = data.total
@@ -254,7 +279,7 @@ async function collectReviews(type, mediaId, client, maxPages = CONFIG.maxPages,
       const value = Number(item.score), level = Number(item.author?.level), time = Number(item.ctime)
       const row = [value, Number.isInteger(level) && level >= 0 && level <= 6 && item.author?.level != null ? level : null, Number.isFinite(time) && time > 0 ? time : null]
       // Hash the fallback too; don't store author IDs or comment bodies.
-      const key = createHash('sha256').update(String(item.review_id ?? `${item.author?.mid}:${row.join(':')}`)).digest('hex')
+      const key = reviewKey(item)
       if (seen.has(key)) continue
       seen.add(key); state.seen.push(key)
       if (SCORES.includes(value)) state.rows.push(row); else state.skipped++
@@ -298,7 +323,15 @@ async function analyze(input, client, progress = async () => {}, options = {}) {
 function progressText(job) {
   const labels = { running:'采集中',waiting:'冷却等待',paused:'已暂停',cancelled:'已取消（保留进度）',complete:'已完成' }
   const remaining = Math.max(0, Math.ceil((job.resumeAfter-Date.now())/1000))
-  return `${job.media?.title || job.input}：${labels[job.status] || '已暂停'} · ${job.phase}\n短评 ${job.short.pages} 页 / ${count(job.short.rows.length)} 条有效样本；长评 ${job.long.pages} 页 / ${count(job.long.rows.length)} 条有效样本。${remaining ? `\n冷却还需约 ${remaining} 秒。` : ''}\n发送 #番剧评分继续 续采；#番剧评分取消 停止当前采集并保留进度。`
+  const reason = job.lastError && ['paused','cancelled'].includes(job.status) ? `\n上次停止原因：${job.lastError.message}` : ''
+  return `${job.media?.title || job.input}：${labels[job.status] || '已暂停'} · ${job.phase}\n短评 ${job.short.pages} 页 / ${count(job.short.rows.length)} 条有效样本；长评 ${job.long.pages} 页 / ${count(job.long.rows.length)} 条有效样本。${reason}${remaining ? `\n冷却还需约 ${remaining} 秒。` : ''}\n发送 #番剧评分继续 续采；#番剧评分取消 停止当前采集并保留进度。`
+}
+
+function recoveryHint(error) {
+  if (error.kind === 'risk') return '风控响应持续时，请先在 B 站处理验证并更新共享 Cookie。'
+  if (error.kind === 'pagination') return '分页异常与风控不同；等待不会保证恢复，请管理员检查分页响应。'
+  if (error.kind === 'transient') return '请检查网络或稍后重试。'
+  return ''
 }
 
 function summarize(rows) {
@@ -439,7 +472,7 @@ export class example extends plugin {
       if (previous && previous.status !== 'complete' && previous.target !== target) throw new Error('你有另一部番剧的未完成进度。发送 #番剧评分继续 续采；或 #番剧评分重来 番剧编号 替换旧进度。')
       const resumed = previous && previous.target === target && (previous.status !== 'complete' || action === '继续')
       job = resumed ? previous : newCheckpoint(command.input,command.filterLevel)
-      active.job = job; job.filterLevel = command.filterLevel
+      active.job = job; job.filterLevel = command.filterLevel; delete job.lastError
       save = () => store.save(job)
       job.status = 'running'
       await save()
@@ -460,6 +493,10 @@ export class example extends plugin {
       }})
       const data = await analyze(job.input,client,label=>notify(`正在采集${label}…\n${progressText(job)}`),{
         job,save,signal:active.controller.signal,
+        onTail:async()=>{
+          await notify('接口疑似已到评论末页，正在复核重复游标；不是风控，将保留已采集样本。')
+          await delay(3000,active.controller.signal)
+        },
         onStall:async()=>{
           await wait(15000,'评论分页暂时停止推进。')
           await delay(15000,active.controller.signal)
@@ -487,10 +524,11 @@ export class example extends plugin {
       let saved = false, saveError
       if (job) {
         job.status = active.controller.signal.aborted ? 'cancelled' : 'paused'
+        job.lastError = { kind:active.controller.signal.aborted ? 'cancelled' : error.kind || 'other', message:String(error.message).slice(0,500), at:Date.now() }
         job.resumeAfter = Math.max(job.resumeAfter,error.resumeAfter || 0)
         try { await save(); saved = true } catch (failure) { saveError = failure.message }
       }
-      await e.reply(`统计未完成：${error.message}${saved ? '\n进度已保存。发送 #番剧评分继续 或重发相同番剧编号，从断点继续。风控持续时，请先在 B 站处理验证并更新共享 Cookie。' : ''}${saveError ? '\n'+saveError+' 最近一次成功落盘后的进度可能丢失。' : ''}`)
+      await e.reply(`统计未完成：${error.message}${saved ? '\n进度已保存。发送 #番剧评分继续 或重发相同番剧编号，从断点继续。'+recoveryHint(error) : ''}${saveError ? '\n'+saveError+' 最近一次成功落盘后的进度可能丢失。' : ''}`)
     } finally { runtime.jobs.delete(key) }
     return true
   }

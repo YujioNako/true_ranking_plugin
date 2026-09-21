@@ -134,9 +134,45 @@ test('periodic checkpoint bounds progress lost on a hard process stop to nine su
 test('stalled or empty nonterminal pages retry the same cursor once, never mark partial data complete',async()=>{
   for(const list of [[],[item(1)]]) {
     const state=bot.newCheckpoint('md1',0).short;let calls=0,stalls=0
-    await assert.rejects(bot.collectReviews('short','1',{request:async()=>({data:{list:++calls===1?[item(1)]:list,next:'123',total:1}})},100,{state,onStall:async()=>{stalls++}}),/停止推进/)
+    await assert.rejects(bot.collectReviews('short','1',{request:async()=>({data:{list:++calls===1?[item(1)]:list,next:'123',total:100}})},100,{state,onStall:async()=>{stalls++}}),/停止推进/)
     assert.equal(stalls,1);assert.equal(calls,3);assert.equal(state.pages,1);assert.equal(state.cursor,'123');assert.equal(state.done,false)
   }
+})
+
+test('observed ep1521592 tail: repeated known last review confirms EOF without duplicating rows',async()=>{
+  for (const finalList of [[item(14)],[]]) {
+    const state=bot.newCheckpoint('ep1521592',5).short
+    Object.assign(state,{pages:2963,cursor:'9997',cursors:['9997']})
+    let calls=0,confirmed=0,saved=0
+    const result=await bot.collectReviews('short','23679586',{request:async url=>{
+      calls++
+      assert.ok(url.includes(calls===1?'cursor=9997':'cursor=9978'))
+      return{data:{list:calls===1?Array.from({length:14},(_,i)=>item(i+1)):finalList,next:'9978',total:59273}}
+    }},10000,{state,save:async()=>{saved++},onTail:async()=>{confirmed++}})
+    assert.equal(calls,3);assert.equal(confirmed,1);assert.ok(saved>=2)
+    assert.equal(result.rows.length,14);assert.equal(state.pages,2964)
+    assert.equal(state.done,true);assert.equal(state.endReason,'confirmed-repeated-tail')
+  }
+})
+
+test('full repeated page, unknown review, earlier loop and changing tail are never accepted as EOF',async()=>{
+  for (const mode of ['full','unknown','early','changing']) {
+    const state=bot.newCheckpoint('md1',5).short;let calls=0
+    await assert.rejects(bot.collectReviews('short','1',{request:async()=>{
+      calls++
+      const list=calls===1||mode==='full'?Array.from({length:20},(_,i)=>item(i+1)):[item(mode==='unknown'?999:mode==='changing'?calls%2+1:20)]
+      return {data:{list,next:'123',total:mode==='early'?100:20}}
+    }},100,{state,onTail:async()=>{},onStall:async()=>{}}),e=>e.kind==='pagination')
+    assert.equal(state.done,false);assert.equal(state.rows.length,20);assert.ok(calls<=6)
+  }
+})
+
+test('only real risk errors suggest verification; saved progress records the actual pause reason',()=>{
+  assert.match(bot.recoveryHint(new bot.RequestError('risk','risk')),/Cookie/)
+  for(const error of [new bot.RequestError('pagination','pagination'),new bot.RequestError('network','transient'),new Error('disk')])assert.ok(!bot.recoveryHint(error).includes('Cookie'))
+  const job=bot.newCheckpoint('md1',5)
+  job.status='paused';job.lastError={kind:'pagination',message:'分页停止推进，不是风控响应。',at:Date.now()}
+  assert.match(bot.progressText(job),/上次停止原因：分页停止推进/)
 })
 
 test('damaged checkpoints fail explicitly without silently starting a fresh collection',async()=>{
